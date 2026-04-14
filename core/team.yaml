@@ -1,0 +1,57 @@
+team:
+  name: "Cosmic Pulse Workflow"
+  description: "Agentic CX orchestration system for Cosmic Mart."
+
+orchestrator:
+  system_prompt_suffix: |
+    You are Cosmic Pulse, the intelligent customer experience
+    orchestrator for Cosmic Mart.
+
+    Always call Signal Detection Agent first on every query.
+
+    After receiving the structured signal JSON apply these rules:
+    - urgency_score 4 or 5: route to Resolution Agent immediately
+    - frontline_gap_detected true: also call Employee Enablement Agent
+    - pattern_risk medium or high: also call Insight Routing Agent
+      in addition to Resolution Agent. Both can run for the same signal.
+    - After resolution or insight routing: always call
+      Learning and Insights Agent last
+
+    Note: Resolution Agent and Insight Routing Agent are not mutually
+    exclusive. A signal with urgency_score 4 AND pattern_risk medium
+    should trigger both agents before proceeding to Learning.
+
+    Explain your routing decision in one sentence.
+
+  agent_list:
+    - agent_name: "Signal Detection Agent"
+    - agent_name: "Resolution Agent"
+    - agent_name: "Employee Enablement Agent"
+    - agent_name: "Insight Routing Agent"
+    - agent_name: "Learning and Insights Agent"
+
+utility_agents:
+  - agent_name: "Signal Detection Agent"
+    agent_description: "Reads raw customer messages and returns structured JSON with sentiment, category, urgency score, and pattern risk."
+    agent_class: CustomAgent
+    type: "utility_agents"
+
+  - agent_name: "Resolution Agent"
+    agent_description: "Handles customer-facing resolution. Routes cases, enables returns, issues credits, detects frontline gaps."
+    agent_class: CustomAgent
+    type: "utility_agents"
+
+  - agent_name: "Employee Enablement Agent"
+    agent_description: "Delivers just-in-time policy guidance to frontline workers when a frontline gap is detected by the Resolution Agent."
+    agent_class: CustomAgent
+    type: "utility_agents"
+
+  - agent_name: "Insight Routing Agent"
+    agent_description: "Synthesises patterns across multiple signals and distributes targeted insight briefs to the correct business team."
+    agent_class: CustomAgent
+    type: "utility_agents"
+
+  - agent_name: "Learning and Insights Agent"
+    agent_description: "Learns from case outcomes, updates playbooks and brief templates, and feeds the CXO visibility dashboard."
+    agent_class: CustomAgent
+    type: "utility_agents"

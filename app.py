@@ -45,6 +45,13 @@ from py_scripts.insight_routing import insight_routing_agent
 from py_scripts.learning_insights import learning_insights_agent
 from data_generator import generate_signal, generate_demo_set
 
+# ABOUT FIX — live mermaid diagram
+try:
+    from streamlit_mermaid import st_mermaid  # type: ignore
+    MERMAID_AVAILABLE = True
+except ImportError:
+    MERMAID_AVAILABLE = False
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Page config
 # ─────────────────────────────────────────────────────────────────────────────
@@ -119,57 +126,75 @@ DEMO_SIGNALS_META = [
     (5, "Europe",        "other",                 3, "medium", "Route 2 — Insight only"),    # SIGNAL PATH — Route 2 Insight only
 ]
 
-# DIAGRAM — About tab
-MERMAID_DIAGRAM = """flowchart TD
-  SIG[Experience Signals VoC + Ops Data]:::ext
-  PII[PII Masking and Responsible AI]:::ext
-  ENT[Enterprise Systems CRM Contact Center Commerce]:::ext
-  DET["[Signal Detection Agent]"]:::agent
-  ORC["[Cosmic Pulse Orchestrator]"]:::agent
-  RES["[Resolution Agent]"]:::agent
-  EEA["[Employee Enablement Agent]"]:::agent
-  INS["[Insight Routing Agent]"]:::agent
-  LRN["[Learning Agent]"]:::agent
-  GOV["[Human in the Loop Governance]"]:::gov
+# ABOUT FIX — full detailed diagram with labels, subgraph legend, and rich node text
+COSMIC_PULSE_DIAGRAM = """flowchart TD
+
+  SIG[Experience Signals<br/>VoC + Ops Data<br/>- Support interactions<br/>- Social sentiment and topics<br/>- Reviews and feedback<br/>- Store feedback]:::ext
+  PII[PII Masking and Responsible AI<br/>Remove personal data<br/>Privacy controls across markets]:::ext
+  ENT[Enterprise Systems<br/>CRM - Contact Center - Commerce and Returns]:::ext
+
+  DET["[Signal Detection Agent<br/>Detect friction and trends<br/>Tag topic: returns, support, price, store, product]"]:::agent
+  ORC["[Cosmic Pulse Orchestrator<br/>Choose workflow: Resolution or Insight Routing]"]:::agent
+  RES["[Resolution Agent<br/>Run Resolution Playbooks<br/>- Case routing and escalation<br/>- Returns and refunds where allowed]"]:::agent
+  EEA["[Employee Enablement Agent optional<br/>Just in time policy guidance<br/>Triggered by complexity or frontline strain]"]:::agent
+  INS["[Insight Routing Agent<br/>Run Insight Brief Templates<br/>Synthesize patterns and send briefs]"]:::agent
+  LRN["[Learning Agent<br/>Improve agent knowledge<br/>Update playbooks and brief templates]"]:::agent
+
+  GOV["[Human in the Loop Governance<br/>Approve high impact actions]"]:::gov
+
   T1(Pricing and Promotions):::stake
   T2(Store Operations):::stake
   T3(Merchandising and Assortment):::stake
   T4(Returns and Policy Owners):::stake
   T5(Support Leadership):::stake
-  OUT(Outcome Signals):::stake
-  CXO(CXO Visibility):::stake
+  OUT(Outcome Signals<br/>- Sentiment and topic shifts<br/>- Repeat complaint patterns<br/>- Team action taken):::stake
+  CXO(CXO Visibility<br/>Sentiment - Cost to serve - Demand trends):::stake
 
-  SIG --> PII
-  PII --> DET
-  DET --> ORC
+  SIG -->|Collect signals for analysis| PII
+  PII -->|Anonymize for safe processing| DET
+  DET -->|Structured themes and trend flags| ORC
+
   ORC -->|Single urgent customer case| RES
   ORC -->|Repeated pattern across customers| INS
-  RES --> ENT
-  RES --> GOV
-  GOV --> ENT
-  RES --> EEA
-  EEA --> ENT
-  INS --> T1
-  INS --> T2
-  INS --> T3
-  INS --> T4
-  INS --> T5
-  ENT --> OUT
-  INS --> OUT
-  T1 -.-> OUT
-  T2 -.-> OUT
-  T3 -.-> OUT
-  T4 -.-> OUT
-  T5 -.-> OUT
-  OUT --> LRN
-  LRN --> RES
-  LRN --> INS
-  LRN --> CXO
+
+  RES -->|Execute low risk actions in systems| ENT
+  RES -->|High impact action needs approval| GOV
+  GOV -->|Approved action executed in systems| ENT
+
+  RES -->|Complex case or frontline strain| EEA
+  EEA -->|Guidance applied in frontline workflow| ENT
+
+  INS -->|Pricing and value complaints| T1
+  INS -->|Store experience complaints| T2
+  INS -->|Product and selection complaints| T3
+  INS -->|Returns and policy friction| T4
+  INS -->|Support responsiveness themes| T5
+
+  ENT -->|Service outcomes and repeat contact signals| OUT
+  INS -->|Insights sent and prioritization metadata| OUT
+  T1 -.->|Team action status| OUT
+  T2 -.->|Team action status| OUT
+  T3 -.->|Team action status| OUT
+  T4 -.->|Team action status| OUT
+  T5 -.->|Team action status| OUT
+
+  OUT -->|What worked vs what did not| LRN
+  LRN -->|Update resolution playbooks| RES
+  LRN -->|Update insight brief templates| INS
+  LRN -->|Trends and drivers for leadership| CXO
 
   classDef ext fill:#F3F4F6,stroke:#6B7280,color:#111827
   classDef agent fill:#DBEAFE,stroke:#2563EB,color:#0F172A
   classDef stake fill:#DCFCE7,stroke:#16A34A,color:#052E16
   classDef gov fill:#FEF3C7,stroke:#D97706,color:#7C2D12
+
+  subgraph LEGEND["Legend"]
+    direction LR
+    LEXT[External Data / Systems]:::ext
+    LAGENT["[Agentic Component]"]:::agent
+    LSTAKE(Stakeholder / Outcome):::stake
+    LGOV["[Human Governance]"]:::gov
+  end
 """
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -187,40 +212,69 @@ def _ts() -> str:
     return datetime.now().strftime("%H:%M:%S")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# ROUTING FIX — mutually exclusive ORC branches
+# ROOT FIX 3 — routing uses Signal Detection output directly, no lock
 # The Orchestrator chooses ONE route: Resolution OR Insight Routing, never both.
+# Works correctly for all modes (Live Demo, Quick Generate, Manual Input)
+# because the generator now writes calibrated text that Signal Detection scores correctly.
 # ─────────────────────────────────────────────────────────────────────────────
+
+# ROUTING TEST STRINGS — paste into Manual Input to verify routing is correct
+# Test A (should route to INSIGHT ROUTING — urgency 2, pattern high):
+#   "I tried to return my headphones using the app portal but it keeps crashing.
+#    I'm not in a rush but I saw hundreds of other customers reporting the exact
+#    same crash on Trustpilot this week and on the community forum. Seems like a
+#    systemic issue. Would appreciate a fix when possible."
+#   Expected: urgency 2, pattern_risk high → Insight Routing
+#
+# Test B (should route to RESOLUTION — urgency 5, pattern low):
+#   "My order hasn't arrived and the tracking hasn't updated in 4 days. I've
+#    called twice and nobody can find my order. If this isn't resolved by tomorrow
+#    I will dispute the charge with my bank and contact the consumer protection
+#    bureau immediately."
+#   Expected: urgency 5, pattern_risk low → Resolution
+
 def compute_routing(urgency: int, pattern_risk: str) -> tuple:
     """
-    Strictly follows the diagram arrows:
+    ROOT FIX 3 — routing from Signal Detection output, no intended_route lock.
+    Strictly follows the two diagram arrows:
         ORC -->|Single urgent customer case| RES
         ORC -->|Repeated pattern across customers| INS
     Returns (route, routing_label, routing_reason).
     route == "resolution"  OR  "insight" — never both simultaneously.
 
-    SIGNAL PATH — Route 1 Resolution  : urgency >= 4
-    SIGNAL PATH — Route 2 Insight only: pattern_risk medium/high AND urgency <= 3
-    Default                           : Resolution (low urgency + low pattern)
+    Route 1 — Resolution    : urgency >= 4
+    Route 2 — Insight (high): pattern_risk "high"  AND urgency <= 3
+    Route 2 — Insight (med) : pattern_risk "medium" AND urgency <= 3
+    Default                 : Resolution (low urgency + low pattern)
     """
-    # SIGNAL PATH — Route 1 Resolution
-    # urgency 4 or 5 = urgent individual customer case
+    # Route 1 — Single urgent customer case
     if urgency >= 4:
         return (
             "resolution",
             "Single urgent customer case",
-            (f"urgency_score {urgency} indicates an urgent individual customer case. "
-             f"Routing to Resolution Agent. "
+            (f"urgency_score {urgency} detected in signal — indicates an urgent "
+             f"individual customer case. Routing to Resolution Agent. "
              f"Insight Routing Agent: not triggered."),
         )
 
-    # SIGNAL PATH — Route 2 Insight only
-    # Low urgency + medium/high pattern = repeated pattern across customers
-    if pattern_risk in ("medium", "high") and urgency <= 3:
+    # Route 2 — Repeated pattern (high confidence)
+    if pattern_risk == "high" and urgency <= 3:
         return (
             "insight",
             "Repeated pattern across customers",
-            (f"pattern_risk '{pattern_risk}' with urgency_score {urgency} indicates a "
-             f"repeated pattern across customers, not an urgent individual case. "
+            (f"pattern_risk '{pattern_risk}' with urgency_score {urgency} — "
+             f"multiple customers affected, confirmed widespread issue. "
+             f"Routing to Insight Routing Agent. "
+             f"Resolution Agent: not triggered."),
+        )
+
+    # Route 2 — Emerging pattern (medium confidence)
+    if pattern_risk == "medium" and urgency <= 3:
+        return (
+            "insight",
+            "Emerging pattern across customers",
+            (f"pattern_risk '{pattern_risk}' with urgency_score {urgency} — "
+             f"pattern is emerging across customers, not an urgent individual case. "
              f"Routing to Insight Routing Agent. "
              f"Resolution Agent: not triggered."),
         )
@@ -228,9 +282,9 @@ def compute_routing(urgency: int, pattern_risk: str) -> tuple:
     # Default — low urgency, low pattern → Resolution (standard individual case)
     return (
         "resolution",
-        "Single customer case (standard)",
+        "Standard customer case",
         (f"urgency_score {urgency}, pattern_risk '{pattern_risk}'. "
-         f"Routing to Resolution Agent."),
+         f"Standard individual case. Routing to Resolution Agent."),
     )
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1428,139 +1482,173 @@ def render_results_tab(results, demo_results=None) -> None:
         c3.metric("HITL Triggered","Yes")
 
 
-# FIX 6 — About tab with architecture diagram
+# ABOUT FIX — live mermaid diagram and full rewrite
 def render_about_tab() -> None:
-    st.markdown('<h3 style="color:#0F172A;font-size:1rem;font-weight:700;margin-bottom:1rem;">'
-                '🌌 About Cosmic Pulse</h3>', unsafe_allow_html=True)
 
+    # Header
     st.markdown("""
-**Cosmic Pulse** is a multi-agent AI system built for Cosmic Mart's customer experience operations.
-- 144 million customers across 10 markets — every signal is routed, resolved, and learned from
-- Five specialised agents replace manual triage, escalation, and insight reporting
-- Built with the **Accenture AI Refinery SDK** · Python 3.11 · Streamlit
+    <div style="background: linear-gradient(135deg, #1E1B4B, #6D28D9);
+                border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem;">
+      <h2 style="color:white; margin:0; font-size:1.25rem; font-weight:700;">
+        Cosmic Pulse — System Architecture
+      </h2>
+      <p style="color:#C4B5FD; margin:0.5rem 0 0; font-size:0.875rem;">
+        Agentic AI Customer Experience Orchestration for Cosmic Mart
+      </p>
+    </div>
+    """, unsafe_allow_html=True)
 
----
-#### Agent Descriptions
-| Agent | Purpose |
-|---|---|
-| 🔵 Signal Detection | Reads raw customer messages and returns structured JSON: sentiment, category, urgency score (1–5), and pattern risk |
-| 🟢 Resolution | Handles customer-facing resolution — routes cases, issues credits, detects frontline gaps, flags high-impact cases for human review |
-| ⚖️ Human Governance | Pauses the pipeline when `requires_human=true` and waits for an Approve / Reject decision |
-| 🩵 Employee Enablement | Delivers just-in-time policy guidance to frontline workers when a gap is detected |
-| 🔷 Insight Routing | Synthesises cross-signal patterns and distributes targeted briefs to the correct business team |
-| 🟣 Learning & Insights | Learns from case outcomes, updates playbooks and CXO dashboard signals |
-
----
-#### Architecture Diagram
-""")
-
-    # FIX 6 — Architecture diagram as formatted code block
-    st.code("""
-  ┌─────────────────────────────────────────────────────────────────┐
-  │                    COSMIC PULSE PIPELINE                        │
-  │                                                                 │
-  │   Customer Signal                                               │
-  │        │                                                        │
-  │        ▼                                                        │
-  │  ┌─────────────────┐                                            │
-  │  │ Signal Detection │  ← always runs first                      │
-  │  └────────┬────────┘                                            │
-  │           │  urgency + pattern_risk                             │
-  │           │                                                     │
-  │    ┌──────┴──────────────────────────────┐                      │
-  │    │  Routing Decision (Python rules)    │                      │
-  │    └──────┬──────────────┬──────────────┘                      │
-  │           │              │                                      │
-  │     run_resolution  run_insight_routing                         │
-  │     (urgency≥3 or   (pattern_risk                               │
-  │      risk≠low)       medium/high)                               │
-  │           │              │                                      │
-  │           ▼              ▼                                      │
-  │  ┌──────────────┐  ┌─────────────────┐                         │
-  │  │  Resolution  │  │ Insight Routing │  ← both can run         │
-  │  └──────┬───────┘  └────────────────┘    simultaneously        │
-  │         │                                                       │
-  │  requires_human=true?                                           │
-  │         │                                                       │
-  │         ▼                                                       │
-  │  ┌──────────────────┐                                           │
-  │  │ Human Governance │  ← HITL pause (Quick/Manual modes)        │
-  │  │  Approve/Reject  │                                           │
-  │  └──────┬───────────┘                                           │
-  │         │                                                       │
-  │  frontline_gap=true?                                            │
-  │         │                                                       │
-  │         ▼                                                       │
-  │  ┌──────────────────────┐                                       │
-  │  │ Employee Enablement  │  ← triggered by Resolution output     │
-  │  └──────────────────────┘                                       │
-  │         │                                                       │
-  │         ▼                                                       │
-  │  ┌─────────────────────────┐                                    │
-  │  │ Learning & Insights     │  ← always runs last                │
-  │  │ (CXO Dashboard)         │                                    │
-  │  └─────────────────────────┘                                    │
-  └─────────────────────────────────────────────────────────────────┘
-""", language=None)
-
-    st.markdown("""
----
-#### Routing Rules — 2 Mutually Exclusive Routes (plain English)
-```
-The Orchestrator chooses ONE route. These are the two diagram arrows:
-  ORC -->|Single urgent customer case| RES
-  ORC -->|Repeated pattern across customers| INS
-
-ROUTE 1 — Resolution    urgency ≥ 4
-           → Detection → Resolution Agent → Enterprise Systems → Learning
-           → Sub-routes (triggered by Resolution output):
-               HITL     : requires_human = true    → pause for Approve/Reject
-               EEA      : frontline_gap_detected = true → Employee Enablement
-
-ROUTE 2 — Insight only  pattern_risk medium/high  AND  urgency ≤ 3
-           → Detection → Insight Routing Agent → T1–T5 Teams → Learning
-           → Resolution Agent: NOT called
-           → Employee Enablement: NOT called (requires Resolution first)
-
-Default    urgency ≤ 3  AND  pattern_risk = low  → Route 1 (standard individual case)
-```
-
----
-#### Architecture Diagram
-""")
-
-    # DIAGRAM — About tab: Mermaid diagram with fallback code block
-    try:
-        from streamlit_mermaid import st_mermaid  # type: ignore
-        st_mermaid(MERMAID_DIAGRAM)
-    except ImportError:
-        st.code(MERMAID_DIAGRAM, language="text")
-        st.caption(
-            "Install streamlit-mermaid for interactive diagram rendering: "
-            "`pip install streamlit-mermaid`"
+    # Live Mermaid diagram
+    st.markdown("#### System Diagram")
+    if MERMAID_AVAILABLE:
+        st_mermaid(COSMIC_PULSE_DIAGRAM, height=700)
+    else:
+        st.info(
+            "Install streamlit-mermaid to render the interactive "
+            "diagram: `pip install streamlit-mermaid`"
         )
+        st.code(COSMIC_PULSE_DIAGRAM, language="text")
+
+    st.divider()
+
+    # Two columns: system overview + routing rules / agent descriptions
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown("#### What Cosmic Pulse Does")
+        st.markdown("""
+        Cosmic Pulse is a **multi-agent AI system** that proactively
+        manages customer experience for Cosmic Mart — a global retail
+        brand serving 144 million customers across 10 markets.
+
+        Instead of waiting for complaints to escalate, it continuously
+        monitors signals, diagnoses root causes, and routes to the
+        right resolution path automatically.
+        """)
+
+        st.markdown("#### The Two Routing Paths")
+        st.markdown("""
+        <div style="border-left: 3px solid #2563EB; padding: 0.75rem 1rem;
+                    background:#EFF6FF; border-radius:0 8px 8px 0;
+                    margin-bottom:0.75rem;">
+          <div style="font-weight:600; color:#1D4ED8; font-size:0.875rem;">
+            Route 1 — Single urgent customer case
+          </div>
+          <div style="color:#1E293B; font-size:0.8rem; margin-top:0.25rem;">
+            urgency_score 4 or 5 → Resolution Agent<br/>
+            Sub-routes triggered by Resolution output:<br/>
+            &nbsp;&nbsp;· HITL: requires_human = true → Approve / Reject<br/>
+            &nbsp;&nbsp;· EEA: frontline_gap_detected = true → Employee Enablement
+          </div>
+        </div>
+        <div style="border-left: 3px solid #4F46E5; padding: 0.75rem 1rem;
+                    background:#EEF2FF; border-radius:0 8px 8px 0;">
+          <div style="font-weight:600; color:#4338CA; font-size:0.875rem;">
+            Route 2 — Repeated pattern across customers
+          </div>
+          <div style="color:#1E293B; font-size:0.8rem; margin-top:0.25rem;">
+            urgency ≤ 3 + pattern_risk medium or high<br/>
+            → Insight Routing Agent only<br/>
+            Resolution Agent: NOT called · EEA: NOT called
+          </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.markdown("#### HITL Demo Tips")
+        st.markdown("""
+        In **Quick Generate** mode, set **North America / service_delay /
+        Urgency 5 / Pattern low** — reliably triggers `requires_human: true`.
+
+        Click **Approve** → watch pipeline resume and Learning Agent record
+        the outcome. Click **Reject** → escalation path is recorded.
+        """)
+
+    with col2:
+        st.markdown("#### Agent Descriptions")
+
+        agents = [
+            ("Signal Detection Agent", "#2563EB", "#DBEAFE",
+             "Reads raw customer messages and classifies them into "
+             "structured signals with sentiment, category, urgency "
+             "score (1–5), and pattern risk. Scores are based on "
+             "specific language signals in the text, not general tone."),
+            ("Cosmic Pulse Orchestrator", "#6D28D9", "#EDE9FE",
+             "Receives the structured signal and makes the routing "
+             "decision — Resolution or Insight Routing — based on "
+             "urgency and pattern risk. Strictly mutually exclusive."),
+            ("Resolution Agent", "#059669", "#DCFCE7",
+             "Runs resolution playbooks for urgent individual cases. "
+             "Issues refunds, simplifies returns, escalates to humans "
+             "for high-impact actions, detects frontline policy gaps."),
+            ("Employee Enablement Agent", "#0F766E", "#CCFBF1",
+             "Optional. Triggered when Resolution detects a frontline "
+             "knowledge gap (frontline_gap_detected = true). Delivers "
+             "just-in-time policy guidance to staff through their "
+             "existing workflows."),
+            ("Insight Routing Agent", "#3730A3", "#E0E7FF",
+             "Synthesises repeated patterns across multiple customers "
+             "and sends targeted insight briefs to the right business "
+             "team — Pricing (T1), Store Ops (T2), Merchandising (T3), "
+             "Returns (T4), or Support Leadership (T5)."),
+            ("Learning Agent", "#334155", "#F1F5F9",
+             "Runs after every case. Updates Resolution playbooks and "
+             "Insight brief templates based on what worked and what "
+             "failed. Feeds trends and drivers to the CXO dashboard."),
+            ("Human-in-the-Loop Governance", "#B45309", "#FEF3C7",
+             "Pauses the pipeline when Resolution flags a high-impact "
+             "action (requires_human = true). A human must approve or "
+             "reject before the action executes in Enterprise Systems."),
+        ]
+
+        for name, color, bg, desc in agents:
+            st.markdown(f"""
+            <div style="border-left: 3px solid {color};
+                        background: {bg};
+                        border-radius: 0 8px 8px 0;
+                        padding: 0.6rem 0.875rem;
+                        margin-bottom: 0.5rem;">
+              <div style="font-weight: 600; color: {color};
+                          font-size: 0.8rem;">
+                {name}
+              </div>
+              <div style="color: #1E293B; font-size: 0.75rem;
+                          margin-top: 0.2rem; line-height: 1.4;">
+                {desc}
+              </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+    st.divider()
+
+    # Tech stack
+    st.markdown("#### Tech Stack")
+    cols = st.columns(4)
+    stack = [
+        ("Accenture AI Refinery SDK", "Agent orchestration + LLM calls"),
+        ("openai/gpt-oss-120b", "Model for all five agents"),
+        ("Python 3.12 + Streamlit", "Backend pipeline + demo UI"),
+        ("streamlit-mermaid", "Interactive architecture diagram"),
+    ]
+    for col, (tech, role) in zip(cols, stack):
+        with col:
+            st.markdown(f"""
+            <div style="background:#F8FAFC; border:1px solid #E2E8F0;
+                        border-radius:8px; padding:0.875rem;
+                        text-align:center;">
+              <div style="font-weight:600; color:#1E1B4B;
+                          font-size:0.8rem;">{tech}</div>
+              <div style="color:#64748B; font-size:0.7rem;
+                          margin-top:0.2rem;">{role}</div>
+            </div>
+            """, unsafe_allow_html=True)
 
     st.markdown("""
----
-#### Tech Stack
-| Component | Technology |
-|---|---|
-| Agent LLM calls | Accenture AI Refinery SDK (`AsyncAIRefinery`) |
-| Multi-agent orchestration | `DistillerClient` + explicit Python routing |
-| Model | `openai/gpt-oss-120b` |
-| Signal generation | LLM-powered `data_generator.py` |
-| UI | Streamlit 1.32+ |
-| Language | Python 3.11 |
-
----
-#### Team
-**Cosmic Mart Hackathon Team · Cohort 4 FY26**
-
----
-#### HITL Demo Tips *(Quick Generate mode)*
-Set **North America / service_delay / Urgency 5** — reliably triggers `requires_human: true`.
-Click **Approve** → watch pipeline resume. Click **Reject** → escalation path + Learning records override.
-""")
+    <div style="text-align:center; color:#94A3B8;
+                font-size:0.75rem; margin-top:1.5rem;">
+      Cosmic Mart Agentic AI Hackathon · Cohort 4 FY26 ·
+      Accenture AI Intensive
+    </div>
+    """, unsafe_allow_html=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1629,14 +1717,17 @@ with col_ctrl:
                     unsafe_allow_html=True)
 
     elif st.session_state.mode == "Quick Generate":
-        market   = st.selectbox("Market",   MARKETS,    key="ld_market")
-        source   = st.selectbox("Source",   SOURCES,    key="ld_source")
-        category = st.selectbox("Category", CATEGORIES, key="ld_category")
-        urgency  = st.slider("Urgency", 1, 5, 3, key="ld_urgency")
+        market       = st.selectbox("Market",       MARKETS,                    key="ld_market")
+        source       = st.selectbox("Source",       SOURCES,                    key="ld_source")
+        category     = st.selectbox("Category",     CATEGORIES,                 key="ld_category")
+        urgency      = st.slider("Urgency", 1, 5, 3,                            key="ld_urgency")
+        # ROOT FIX 3 — pattern_risk controls generated text calibration AND routing
+        pattern_risk = st.selectbox("Pattern Risk", ["low", "medium", "high"],  key="ld_pattern")
+        st.caption("low → Route 1 (Resolution) · medium/high + urgency ≤ 3 → Route 2 (Insight)")
 
         if st.button("🎲 Generate Signal", use_container_width=True, key="gen_btn"):
             with st.spinner("Generating…"):
-                gen = run_async(generate_signal(market, source, category, urgency))
+                gen = run_async(generate_signal(market, source, category, urgency, pattern_risk))
             st.session_state.signal            = gen
             st.session_state.pipeline_complete = False
             st.session_state.pipeline_results  = {}

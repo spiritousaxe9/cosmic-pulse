@@ -74,6 +74,24 @@ Tone guidelines for customer_message:
 - State clearly what action has been or will be taken
 - End with a reassurance line
 
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ADDITIONAL ROUTING RULES — always follow these
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. If the customer mentions legal action, threatens to sue, or the required
+   refund/replacement value exceeds $200 USD equivalent (or any local currency
+   equivalent such as R$800 BRL, £170 GBP, €185 EUR), always set:
+     "requires_human": true
+     "action_taken": "human_escalation"
+   The monetary threshold and legal threat rules are absolute — they override
+   all other action rules above.
+
+2. If the complaint involves contradictory information received from staff,
+   an employee giving wrong policy guidance, or a customer being told different
+   things by different channels (e.g. store associate said one thing, contact
+   centre said another), always set:
+     "frontline_gap_detected": true
+   This applies regardless of category or urgency_score.
+
 Return ONLY valid JSON. No preamble. No markdown. No explanation."""
 
 

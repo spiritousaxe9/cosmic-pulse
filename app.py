@@ -109,12 +109,13 @@ AGENT_COLORS = {
     "Human Governance":           {"border":"#F59E0B","text":"#B45309","bg":"#FFFBEB","light":"#FEF3C7"},
 }
 
+# ROUTING — diagram logic: one entry per path (n, market, category, urgency, pattern, path_label)
 DEMO_SIGNALS_META = [
-    (1,"North America","service_delay",5),
-    (2,"Europe","return_friction",3),
-    (3,"Asia","price_dissatisfaction",4),
-    (4,"South America","product_quality",4),
-    (5,"Europe","other",3),
+    (1, "North America", "service_delay",        5, "low",    "Resolution only"),       # SIGNAL PATH A
+    (2, "Europe",        "return_friction",       2, "high",   "Insight Routing only"),  # SIGNAL PATH B
+    (3, "Asia",          "price_dissatisfaction", 4, "high",   "Resolution + Insight"),  # SIGNAL PATH C
+    (4, "South America", "product_quality",       5, "low",    "Resolution + HITL"),     # SIGNAL PATH D
+    (5, "Europe",        "other",                 3, "medium", "Resolution + EEA"),      # SIGNAL PATH E
 ]
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -132,22 +133,65 @@ def _ts() -> str:
     return datetime.now().strftime("%H:%M:%S")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# FIX 1 + FIX 7 — Routing helper
-# ROUTING — strictly follows Cosmic Pulse diagram architecture
+# ROUTING — diagram logic
+# Implements the 5 distinct paths shown in the Cosmic Pulse architecture diagram.
 # ─────────────────────────────────────────────────────────────────────────────
 def compute_routing(urgency: int, pattern_risk: str) -> tuple:
     """
-    # ROUTING — strictly follows Cosmic Pulse diagram architecture
-    Rule A: urgency 4-5           → Resolution fires
-    Rule B: pattern_risk med/high → Insight Routing fires (adds to Rule A if both)
-    Rule C: urgency 1-2 + low     → Resolution skipped
-    FIX 7:  Resolution fires for ALL signals EXCEPT urgency<=2 AND pattern_risk=="low"
-            Signal 5 (urgency 3, pattern_risk medium) → Resolution + Insight Routing
+    Returns (run_resolution, run_insight_routing, routing_path, routing_reason).
+
+    SIGNAL PATH A — Resolution only         : urgency >= 4 AND pattern_risk == "low"
+    SIGNAL PATH B — Insight Routing only    : urgency <= 3 AND pattern_risk == "high"
+    SIGNAL PATH C — Resolution + Insight    : urgency >= 4 AND pattern_risk in medium/high
+    SIGNAL PATH D — HITL (post-Resolution)  : Resolution returns requires_human == true
+    SIGNAL PATH E — EEA  (post-Resolution)  : Resolution returns frontline_gap_detected == true
+    Default                                 : Resolution only
     """
-    # ROUTING — strictly follows Cosmic Pulse diagram architecture
-    run_resolution     = not (urgency <= 2 and pattern_risk == "low")
-    run_insight_routing = pattern_risk in ("medium", "high")
-    return run_resolution, run_insight_routing
+    # SIGNAL PATH B — Insight Routing ONLY
+    # Low urgency + high pattern = pure pattern escalation, skip individual Resolution
+    if urgency <= 3 and pattern_risk == "high":
+        return (
+            False,
+            True,
+            "Insight Routing only (repeated pattern)",
+            (f"Urgency {urgency} is below resolution threshold. "
+             f"Pattern risk '{pattern_risk}' triggers Insight Routing. "
+             f"No individual resolution needed — this is a "
+             f"business-wide pattern requiring team escalation."),
+        )
+
+    # SIGNAL PATH A — Resolution ONLY
+    # High urgency + low pattern = single urgent case, no pattern escalation
+    if urgency >= 4 and pattern_risk == "low":
+        return (
+            True,
+            False,
+            "Resolution only (single urgent case)",
+            (f"Urgency {urgency} triggers Resolution. "
+             f"Pattern risk '{pattern_risk}' — isolated incident, "
+             f"no pattern escalation needed."),
+        )
+
+    # SIGNAL PATH C — Both Resolution AND Insight Routing
+    # High urgency + medium/high pattern = both paths run in parallel
+    if urgency >= 4 and pattern_risk in ("medium", "high"):
+        return (
+            True,
+            True,
+            "Resolution + Insight Routing (urgent case + pattern)",
+            (f"Urgency {urgency} triggers Resolution for the individual customer. "
+             f"Pattern risk '{pattern_risk}' also triggers Insight Routing "
+             f"for the business pattern. Both paths run in parallel."),
+        )
+
+    # Default — Resolution only for everything else
+    return (
+        True,
+        False,
+        "Resolution (standard case)",
+        (f"Urgency {urgency}, pattern risk '{pattern_risk}'. "
+         f"Standard resolution path."),
+    )
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Rendering helpers
@@ -245,8 +289,16 @@ def step_indicator_html(current: int, total: int = 5) -> str:
 
 # FIX 4 — Routing pathway card
 def routing_pathway_card_html(urgency: int, pattern_risk: str,
-                               run_resolution: bool, run_insight_routing: bool) -> str:
-    """Show which agents will fire for this signal before they run."""
+                               run_resolution: bool, run_insight_routing: bool,
+                               routing_path: str = "", routing_reason: str = "") -> str:
+    """Show which agents will fire for this signal before they run.
+    routing_path / routing_reason come from compute_routing(); if not supplied
+    they are derived here so existing call sites without them still work.
+    """
+    # ROUTING — diagram logic: derive labels if caller did not supply them
+    if not routing_path:
+        _, _, routing_path, routing_reason = compute_routing(urgency, pattern_risk)
+
     def node(label, active, conditional=False):
         if active:
             bg,tc,border = "#EDE9FE","#6D28D9","#8B5CF6"
@@ -272,20 +324,6 @@ def routing_pathway_card_html(urgency: int, pattern_risk: str,
         + node("Learning", True)
     )
 
-    # Build reason text
-    reasons = []
-    if urgency >= 4:
-        reasons.append(f"Urgency {urgency} triggers Resolution.")
-    elif run_resolution:
-        reasons.append(f"Urgency {urgency} + pattern risk → Resolution fires.")
-    else:
-        reasons.append(f"Urgency {urgency} + low risk → Resolution skipped.")
-    if run_insight_routing:
-        reasons.append(f"Pattern risk <strong>{pattern_risk}</strong> triggers Insight Routing.")
-    if run_resolution and run_insight_routing:
-        reasons.append("Both run in parallel, then merge to Learning.")
-    reasons.append("*EEA fires only if Resolution detects a frontline gap.")
-
     urg_t, urg_bg = urgency_color(urgency)
     pr_bg  = "#FEE2E2" if pattern_risk=="high" else "#FEF3C7" if pattern_risk=="medium" else "#DCFCE7"
     pr_col = "#DC2626" if pattern_risk=="high" else "#D97706" if pattern_risk=="medium" else "#059669"
@@ -293,17 +331,20 @@ def routing_pathway_card_html(urgency: int, pattern_risk: str,
     return (
         f'<div style="border-left:3px solid #8B5CF6;border-radius:10px;padding:1rem 1.25rem;'
         f'margin-bottom:.75rem;background:#FAFAFF;box-shadow:0 1px 3px rgba(0,0,0,.05);">'
-        f'<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.6rem;">'
+        f'<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.4rem;">'
         f'<span style="font-weight:700;color:#6D28D9;font-size:.82rem;">📐 Routing Decision</span>'
         f'<span style="background:{urg_bg};color:{urg_t};padding:2px 9px;border-radius:999px;'
         f'font-size:.7rem;font-weight:700;margin-left:auto;">Urgency {urgency}</span>'
         f'<span style="background:{pr_bg};color:{pr_col};padding:2px 9px;border-radius:999px;'
         f'font-size:.7rem;font-weight:600;">risk: {pattern_risk}</span>'
         f'</div>'
-        f'<div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px;margin-bottom:.6rem;">'
+        f'<div style="font-size:.82rem;font-weight:700;color:#1E1B4B;margin-bottom:.5rem;">'
+        f'{routing_path}</div>'
+        f'<div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px;margin-bottom:.5rem;">'
         f'{nodes_html}</div>'
         f'<p style="color:#64748B;font-size:.75rem;margin:0;line-height:1.6;">'
-        f'{" ".join(reasons)}</p></div>'
+        f'{routing_reason} &nbsp;·&nbsp; *EEA fires only if Resolution detects a frontline gap.'
+        f'</p></div>'
     )
 
 
@@ -561,13 +602,14 @@ def run_pipeline_ui(signal: dict) -> None:
         pattern_risk = "low"
         urgency      = signal.get("urgency_score",3)
 
-    # FIX 1 + FIX 7 — compute routing strictly from diagram rules
-    # ROUTING — strictly follows Cosmic Pulse diagram architecture
-    run_resolution, run_insight_routing = compute_routing(urgency, pattern_risk)
+    # ROUTING — diagram logic: deterministic Python, not LLM-driven
+    run_resolution, run_insight_routing, routing_path, routing_reason = compute_routing(urgency, pattern_risk)
 
-    # FIX 4 — Show routing pathway card before agents run
-    slot_route.markdown(routing_pathway_card_html(urgency, pattern_risk, run_resolution, run_insight_routing),
-                        unsafe_allow_html=True)
+    # Show routing pathway card before agents run
+    slot_route.markdown(
+        routing_pathway_card_html(urgency, pattern_risk, run_resolution, run_insight_routing,
+                                  routing_path, routing_reason),
+        unsafe_allow_html=True)
 
     # ── Step 2: Resolution (conditional per routing rules) ─────────────────
     resolution_result = None; ts_res = None
@@ -662,9 +704,10 @@ def render_hitl_paused_ui() -> None:
     ts_res = st.session_state.get("_partial_ts_res")
     urgency      = st.session_state.get("_partial_urgency", 3)
     pattern_risk = st.session_state.get("_partial_pattern_risk","low")
-    run_resolution, run_insight_routing = compute_routing(urgency, pattern_risk)
+    run_resolution, run_insight_routing, routing_path, routing_reason = compute_routing(urgency, pattern_risk)
 
-    st.markdown(routing_pathway_card_html(urgency, pattern_risk, run_resolution, run_insight_routing),
+    st.markdown(routing_pathway_card_html(urgency, pattern_risk, run_resolution, run_insight_routing,
+                                          routing_path, routing_reason),
                 unsafe_allow_html=True)
     st.markdown(agent_card_html("Signal Detection Agent",
                                 st.session_state._partial_detection, True, ts_sd), unsafe_allow_html=True)
@@ -924,10 +967,12 @@ def _run_live_demo() -> None:
         except Exception:
             pattern_risk = "low"; urgency_v = urg
 
-        # ROUTING — strictly follows Cosmic Pulse diagram architecture
-        run_resolution, run_insight_routing = compute_routing(urgency_v, pattern_risk)
-        slot_route.markdown(routing_pathway_card_html(urgency_v, pattern_risk, run_resolution, run_insight_routing),
-                            unsafe_allow_html=True)
+        # ROUTING — diagram logic
+        run_resolution, run_insight_routing, routing_path, routing_reason = compute_routing(urgency_v, pattern_risk)
+        slot_route.markdown(
+            routing_pathway_card_html(urgency_v, pattern_risk, run_resolution, run_insight_routing,
+                                      routing_path, routing_reason),
+            unsafe_allow_html=True)
 
         resolution_result = None; ts_res = None
         frontline_gap = False; requires_human = False; action_taken = ""
@@ -1031,13 +1076,31 @@ def render_live_demo_ui() -> None:
         f'<span style="background:{"#FEE2E2" if u>=4 else "#FEF3C7" if u==3 else "#DCFCE7"};'
         f'color:{"#DC2626" if u>=4 else "#D97706" if u==3 else "#059669"};'
         f'padding:2px 9px;border-radius:999px;font-size:.72rem;font-weight:700;">{u}</span>')
+    pattern_cell = lambda p: (
+        f'<span style="background:{"#FEE2E2" if p=="high" else "#FEF3C7" if p=="medium" else "#DCFCE7"};'
+        f'color:{"#DC2626" if p=="high" else "#D97706" if p=="medium" else "#059669"};'
+        f'padding:2px 9px;border-radius:999px;font-size:.7rem;font-weight:600;">{p}</span>')
+    # Path column color coding per spec
+    _path_style = {
+        "Resolution only":         ("#059669", "#DCFCE7"),   # green
+        "Insight Routing only":    ("#4338CA", "#E0E7FF"),   # indigo
+        "Resolution + Insight":    ("#1D4ED8", "#DBEAFE"),   # blue
+        "Resolution + HITL":       ("#B45309", "#FEF3C7"),   # amber
+        "Resolution + EEA":        ("#0F766E", "#CCFBF1"),   # teal
+    }
+    def path_cell(path):
+        tc, bg = _path_style.get(path, ("#64748B", "#F1F5F9"))
+        return (f'<span style="background:{bg};color:{tc};padding:2px 9px;'
+                f'border-radius:999px;font-size:.7rem;font-weight:600;">{path}</span>')
     rows_html = "".join(
         f'<tr style="border-top:1px solid #E2E8F0;">'
         f'<td style="padding:7px 12px;color:#64748B;font-weight:600;">{n}</td>'
         f'<td style="padding:7px 12px;color:#0F172A;font-weight:500;">{m}</td>'
         f'<td style="padding:7px 12px;color:#0F172A;">{c.replace("_"," ").title()}</td>'
-        f'<td style="padding:7px 12px;">{urgency_cell(u)}</td></tr>'
-        for n, m, c, u in DEMO_SIGNALS_META)
+        f'<td style="padding:7px 12px;">{urgency_cell(u)}</td>'
+        f'<td style="padding:7px 12px;">{pattern_cell(p)}</td>'
+        f'<td style="padding:7px 12px;">{path_cell(path)}</td></tr>'
+        for n, m, c, u, p, path in DEMO_SIGNALS_META)
     st.markdown(
         '<table style="width:100%;border-collapse:collapse;font-size:.82rem;background:white;'
         'border-radius:10px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.06);margin-bottom:1rem;">'
@@ -1046,6 +1109,8 @@ def render_live_demo_ui() -> None:
         '<th style="padding:8px 12px;text-align:left;color:#6D28D9;font-weight:700;">Market</th>'
         '<th style="padding:8px 12px;text-align:left;color:#6D28D9;font-weight:700;">Category</th>'
         '<th style="padding:8px 12px;text-align:left;color:#6D28D9;font-weight:700;">Urgency</th>'
+        '<th style="padding:8px 12px;text-align:left;color:#6D28D9;font-weight:700;">Pattern</th>'
+        '<th style="padding:8px 12px;text-align:left;color:#6D28D9;font-weight:700;">Path</th>'
         f'</tr></thead><tbody>{rows_html}</tbody></table>',
         unsafe_allow_html=True)
 
@@ -1335,16 +1400,31 @@ def render_about_tab() -> None:
 
     st.markdown("""
 ---
-#### Routing Rules (plain English)
+#### Routing Rules — 5 Paths (plain English)
 ```
-1. Signal Detection         → always runs first
-2. Resolution               → runs UNLESS urgency ≤ 2 AND pattern_risk = low
-3. Human Governance (HITL)  → fires when Resolution returns requires_human = true
-                               (Quick Generate and Manual modes only — auto-skipped in Live Demo)
-4. Employee Enablement      → fires when Resolution returns frontline_gap_detected = true
-5. Insight Routing          → fires when pattern_risk = medium or high
-                               Runs IN ADDITION to Resolution, not instead of it
-6. Learning & Insights      → always runs last, receives all previous outputs
+PATH A — Resolution only         urgency ≥ 4  AND  pattern_risk = low
+           → Detection → Resolution → Learning
+           → isolated urgent case; no pattern escalation needed
+
+PATH B — Insight Routing only    urgency ≤ 3  AND  pattern_risk = high
+           → Detection → Insight Routing → Learning
+           → systemic business pattern; no individual resolution needed
+
+PATH C — Resolution + Insight    urgency ≥ 4  AND  pattern_risk = medium or high
+           → Detection → Resolution + Insight Routing (parallel) → Learning
+           → urgent individual case AND widespread business pattern
+
+PATH D — HITL governance         Resolution returns requires_human = true
+           → pipeline pauses for human Approve / Reject
+           → triggered by: legal threat, or refund value > $200 USD equivalent
+           → (Quick Generate and Manual modes; auto-approved in Live Demo)
+
+PATH E — Employee Enablement     Resolution returns frontline_gap_detected = true
+           → Resolution → Employee Enablement → Learning
+           → triggered by: contradictory staff info or employee knowledge gap
+
+         Learning & Insights     → always runs last on every path,
+                                   receives all previous outputs
 ```
 
 ---

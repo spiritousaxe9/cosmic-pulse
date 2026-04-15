@@ -309,14 +309,12 @@ async def _generate_signal_internal(
     category: str,
     urgency_score: int,
     extra_hint: str = "",
+    label: str = "",
+    expected_path: str = "",
 ) -> dict:
     """
-    Core implementation of signal generation — supports an optional extra_hint
-    parameter used by generate_demo_set to inject curated context that ensures
-    specific routing paths are triggered in the orchestrator.
-
-    Calls the AI Refinery LLM and wraps the generated text in a signal dict
-    with the exact keys that main.py expects.
+    Core implementation of signal generation — supports optional extra_hint,
+    label override, and expected_path metadata used by generate_demo_set.
 
     Args:
         market:        Market name.
@@ -324,11 +322,19 @@ async def _generate_signal_internal(
         category:      Complaint category.
         urgency_score: Urgency 1–5.
         extra_hint:    Optional extra context for demo-curated signals.
+        label:         Optional label override; defaults to auto-generated.
+        expected_path: Optional expected routing path string for demo metadata.
 
     Returns:
-        Dict with keys: label, market, source, category, urgency_score, query.
+        Dict with keys: label, market, source, category, urgency_score,
+        query, and (if provided) expected_path.
     """
-    api_key = str(os.getenv("API_KEY"))
+    # HOSTING — works locally (.env) and on Streamlit Cloud (st.secrets)
+    try:
+        import streamlit as st
+        api_key = st.secrets["API_KEY"]
+    except Exception:
+        api_key = str(os.getenv("API_KEY"))
     client = AsyncAIRefinery(api_key=api_key)
 
     system_prompt = _build_system_prompt(
@@ -351,14 +357,17 @@ async def _generate_signal_internal(
     # Strip any accidental whitespace the model may have added
     query = response.choices[0].message.content.strip()
 
-    return {
-        "label": f"{market} {category} urgency {urgency_score}",
-        "market": market,
-        "source": source,
-        "category": category,
+    result = {
+        "label":         label or f"{market} {category} urgency {urgency_score}",
+        "market":        market,
+        "source":        source,
+        "category":      category,
         "urgency_score": urgency_score,
-        "query": query,
+        "query":         query,
     }
+    if expected_path:
+        result["expected_path"] = expected_path
+    return result
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -469,138 +478,153 @@ async def generate_batch(n: int) -> list:
 
 async def generate_demo_set() -> list:
     """
-    Generate exactly 5 curated signals designed to exercise every routing
-    path in the Cosmic Pulse orchestration system.
+    # Prompt for Claude — 5 Unique Signals Covering All Diagram Paths
+    Generate exactly 5 curated signals, one per distinct routing path in the
+    Cosmic Pulse architecture diagram. Each signal reliably triggers its
+    intended path by combining the right urgency_score, pattern_risk, and
+    contextual hints.
 
-    Each signal is crafted with a specific context hint so the LLM generates
-    a message that reliably triggers the intended agent(s):
+    Path coverage:
+        Signal 1 — SIGNAL PATH A — Resolution only
+            market: North America | source: support_ticket | category: service_delay
+            urgency: 5 | pattern_risk: low (isolated incident)
+            expected: Detection → Resolution → Learning
 
-        Signal 1 — North America | support_ticket | service_delay | urgency 5
-            Triggers: Resolution Agent (urgency >= 4)
-                      Employee Enablement Agent (frontline staff unable to help)
-            Context:  Customer called support twice with no resolution.
-                      Threatening bank dispute. Staff explicitly unhelpful.
+        Signal 2 — SIGNAL PATH B — Insight Routing ONLY (no Resolution)
+            market: Europe | source: app_review | category: return_friction
+            urgency: 2 (LOW) | pattern_risk: high (systemic outage)
+            expected: Detection → Insight Routing ONLY → Learning
+            Key: urgency ≤ 3 AND pattern_risk == "high" routes to Insight Routing only
 
-        Signal 2 — Europe | app_review | return_friction | urgency 3
-            Triggers: Insight Routing Agent (pattern_risk high — many customers affected)
-                      Resolution Agent (return friction, urgency 3)
-            Context:  Customer found community forum posts showing many UK/EU customers
-                      have the same portal issue. References EU consumer rights.
+        Signal 3 — SIGNAL PATH C — Resolution AND Insight Routing
+            market: Asia | source: social_media | category: price_dissatisfaction
+            urgency: 4 | pattern_risk: high (regional pattern)
+            expected: Detection → Resolution + Insight Routing → Learning
 
-        Signal 3 — Asia | social_media | price_dissatisfaction | urgency 4
-            Triggers: Resolution Agent (urgency >= 4)
-                      Insight Routing Agent (pattern_risk high — regional pattern)
-            Context:  Price rise across Singapore, Malaysia, Thailand.
-                      Regional Facebook groups and Reddit threads confirming pattern.
+        Signal 4 — SIGNAL PATH D — HITL governance
+            market: South America | source: support_ticket | category: product_quality
+            urgency: 5 | pattern_risk: low (isolated defect)
+            expected: Detection → Resolution → HITL pause → Learning
+            Key: customer mentions legal action → requires_human: true
 
-        Signal 4 — South America | support_ticket | product_quality | urgency 4
-            Triggers: Resolution Agent (urgency >= 4, faulty product)
-            Context:  Specific item arrived visibly damaged.
-                      Store staff couldn't help with online orders — policy unknown.
-
-        Signal 5 — Europe | social_media | other | urgency 3
-            Triggers: Employee Enablement Agent (frontline knowledge gap)
-            Context:  Two staff members gave contradictory loyalty programme answers.
-                      Classic frontline gap — staff have no consistent policy guidance.
-
-    Coverage summary:
-        ✓ At least one urgency 4 or 5     → Resolution Agent       (signals 1, 3, 4)
-        ✓ At least one pattern_risk high  → Insight Routing Agent  (signals 2, 3)
-        ✓ At least one frontline gap      → Employee Enablement    (signals 1, 4, 5)
-        ✓ At least 3 different markets    → NA, Europe, Asia, SA   (all 4 used)
-        ✓ At least 3 different sources    → ticket, review, social (all 3 used)
+        Signal 5 — SIGNAL PATH E — Employee Enablement
+            market: Europe | source: social_media | category: other
+            urgency: 3 | pattern_risk: medium
+            expected: Detection → Resolution → Employee Enablement → Learning
+            Key: contradictory staff info → frontline_gap_detected: true
 
     Returns:
         A list of exactly 5 signal dicts in demo-ready order.
+        Each dict includes an 'expected_path' field for display purposes.
     """
-    # Each tuple: (market, source, category, urgency_score, extra_hint)
+    # Each tuple: (market, source, category, urgency_score, extra_hint, label, expected_path)
     demo_params = [
+        # ── SIGNAL PATH A — Resolution only ────────────────────────────────────
         (
             "North America",
             "support_ticket",
             "service_delay",
             5,
-            # Hint: failed support contacts + frontline gap + bank dispute threat
             (
-                "The customer has already called Cosmic Mart support twice. "
-                "Both times the agent said they would escalate but nothing was ever "
-                "followed up and the order is still missing. Make it very explicit "
-                "that the frontline staff were completely unable to help and did not "
-                "know how to locate the order in their system. "
-                "The customer is now threatening to dispute the charge with their "
-                "bank and share the experience on social media."
+                "Single customer, isolated incident — this is NOT a widespread pattern. "
+                "Order tracking stuck for one customer in Chicago. No other complaints "
+                "about this order batch. Support agents could not locate the order in "
+                "their system — make it clear the frontline staff were helpless. "
+                "Customer is threatening to dispute the charge with their bank and post "
+                "publicly. Mention a specific order number like CM-US-2024-558821."
             ),
+            "North America · service delay · urgency 5 · isolated",
+            "Detection → Resolution → Learning",
         ),
+        # ── SIGNAL PATH B — Insight Routing ONLY (no Resolution) ───────────────
         (
             "Europe",
             "app_review",
             "return_friction",
-            3,
-            # Hint: widespread pattern — community forum evidence + EU rights
+            2,
             (
-                "The customer discovered on the Cosmic Mart community forum and "
-                "Trustpilot that many other UK and EU customers have been hitting "
-                "the exact same return portal failure this week — it is clearly a "
-                "systemic platform issue, not just their device. "
-                "Mention EU consumer rights or the 14-day return law briefly. "
-                "The customer is frustrated that a known issue hasn't been fixed."
+                "IMPORTANT: This is a LOW urgency (2/5) individual complaint — the customer "
+                "is only mildly frustrated, not angry. DO NOT use aggressive language. "
+                "The customer is writing a calm app review mentioning they had a minor "
+                "issue with the returns portal. However, make it clear they noticed "
+                "hundreds of other customers across the UK, Germany, and France have "
+                "posted the same issue this week — it is a massive systemic portal outage "
+                "affecting the entire business. The individual frustration is mild but "
+                "the business impact is huge. Mention EU consumer rights briefly. "
+                "Keep the tone measured and composed — this is urgency 2, not 5."
             ),
+            "Europe · return portal outage · pattern HIGH · no urgent case",
+            "Detection → Insight Routing ONLY → Learning",
         ),
+        # ── SIGNAL PATH C — Both paths ──────────────────────────────────────────
         (
             "Asia",
             "social_media",
             "price_dissatisfaction",
             4,
-            # Hint: regional price pattern across multiple Asian markets
             (
-                "Prices have risen noticeably across Singapore, Malaysia, and Thailand "
-                "over the past few months with no quality improvement. "
-                "The customer has seen hundreds of posts in regional Facebook groups "
-                "and Reddit threads from other customers across Southeast Asia "
-                "saying the same thing. "
-                "Tag @CosmicMart and use CAPS on the price increase figure or "
-                "the word that expresses peak frustration."
+                "Angry individual customer in Singapore demanding an immediate price match. "
+                "Also clearly part of a regional pricing pattern across Southeast Asia "
+                "where Cosmic Mart prices are 30-40% above competitors like Lazada and "
+                "Shopee. The customer has seen hundreds of posts in regional Facebook "
+                "groups and Reddit threads confirming the pattern. Needs both individual "
+                "resolution AND escalation to the Pricing team as a business-wide pattern. "
+                "Tag @CosmicMart and use CAPS on the key frustration word or price figure."
             ),
+            "Asia · price gap · urgency 4 · pattern HIGH · dual path",
+            "Detection → Resolution + Insight Routing → Learning",
         ),
+        # ── SIGNAL PATH D — HITL governance ────────────────────────────────────
         (
             "South America",
             "support_ticket",
             "product_quality",
-            4,
-            # Hint: damaged item + store staff couldn't help = frontline gap
+            5,
             (
-                "A specific item — either a jacket, a pair of trainers, or a small "
-                "kitchen appliance — arrived visibly damaged with a cracked seam or "
-                "broken component that was clearly a manufacturing defect. "
-                "The customer went to the local São Paulo or Buenos Aires store to "
-                "resolve it but the store associate said they have no way to handle "
-                "online order defects in-store and did not know the correct policy. "
-                "Include a specific order number and product name."
+                "Defective product requiring large compensation — a specific item "
+                "(e.g. a blender, jacket, or phone accessory) arrived broken or "
+                "completely non-functional. The replacement or refund value is over "
+                "R$800 BRL (well above the $200 USD auto-approval threshold). "
+                "CRITICAL: The customer explicitly threatens legal action and mentions "
+                "they will contact a consumer protection agency (Procon in Brazil). "
+                "This is an isolated incident — NOT a widespread pattern. "
+                "Include a specific order number like CM-BR-2024-334871 and city "
+                "(São Paulo or Buenos Aires). The high monetary value and legal threat "
+                "require human approval before any action is taken."
             ),
+            "South America · product defect · urgency 5 · HITL required",
+            "Detection → Resolution → HITL pause → Learning",
         ),
+        # ── SIGNAL PATH E — Employee Enablement ────────────────────────────────
         (
             "Europe",
             "social_media",
             "other",
             3,
-            # Hint: explicit frontline knowledge gap — contradictory staff answers
             (
-                "The complaint is specifically about Cosmic Mart staff giving "
-                "completely contradictory information about the loyalty points "
-                "redemption policy. A store associate in the London Oxford Street "
-                "store said one thing; a contact centre agent said the opposite. "
-                "Neither could point to a written policy. "
-                "This is a textbook frontline knowledge gap. "
-                "Tag @CosmicMart and keep it short and punchy."
+                "Customer received completely contradictory information from two Cosmic "
+                "Mart employees about the loyalty points redemption policy. A store "
+                "associate in the London Oxford Street store told them one thing; a "
+                "contact centre agent said the exact opposite. Neither could show a "
+                "written policy. This is a textbook frontline knowledge gap — the "
+                "root cause is employee policy confusion, NOT a system bug or product "
+                "defect. The customer is frustrated but not threatening to leave. "
+                "Moderate urgency only. Tag @CosmicMart. Keep it short and punchy."
             ),
+            "Europe · loyalty policy confusion · frontline gap",
+            "Detection → Resolution → Employee Enablement → Learning",
         ),
     ]
 
     # Fire all 5 LLM calls concurrently — order is preserved by asyncio.gather
     signals = await asyncio.gather(
         *[
-            _generate_signal_internal(market, source, category, urgency, hint)
-            for market, source, category, urgency, hint in demo_params
+            _generate_signal_internal(
+                market, source, category, urgency, hint,
+                label=label, expected_path=expected_path,
+            )
+            for market, source, category, urgency, hint, label, expected_path
+            in demo_params
         ]
     )
 

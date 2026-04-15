@@ -478,40 +478,44 @@ async def generate_batch(n: int) -> list:
 
 async def generate_demo_set() -> list:
     """
-    # Prompt for Claude — 5 Unique Signals Covering All Diagram Paths
-    Generate exactly 5 curated signals, one per distinct routing path in the
-    Cosmic Pulse architecture diagram. Each signal reliably triggers its
-    intended path by combining the right urgency_score, pattern_risk, and
-    contextual hints.
+    Generate exactly 5 curated signals covering the two mutually exclusive routing
+    paths in the Cosmic Pulse architecture diagram. Each signal reliably triggers
+    its intended route based on urgency_score and pattern_risk.
 
-    Path coverage:
-        Signal 1 — SIGNAL PATH A — Resolution only
+    Routing logic (strict if/else):
+        Route 1 — Resolution path  : urgency_score >= 4
+        Route 2 — Insight-only path: pattern_risk in ("medium","high") AND urgency <= 3
+
+    Signal coverage:
+        Signal 1 — Route 1 — Resolution only
             market: North America | source: support_ticket | category: service_delay
             urgency: 5 | pattern_risk: low (isolated incident)
             expected: Detection → Resolution → Learning
 
-        Signal 2 — SIGNAL PATH B — Insight Routing ONLY (no Resolution)
+        Signal 2 — Route 2 — Insight Routing ONLY
             market: Europe | source: app_review | category: return_friction
-            urgency: 2 (LOW) | pattern_risk: high (systemic outage)
+            urgency: 2 (LOW) | pattern_risk: high (systemic portal outage)
             expected: Detection → Insight Routing ONLY → Learning
-            Key: urgency ≤ 3 AND pattern_risk == "high" routes to Insight Routing only
+            Key: urgency ≤ 3 AND pattern_risk == "high" → Insight Routing; Resolution never runs
 
-        Signal 3 — SIGNAL PATH C — Resolution AND Insight Routing
+        Signal 3 — Route 1 — Resolution + Employee Enablement
             market: Asia | source: social_media | category: price_dissatisfaction
             urgency: 4 | pattern_risk: high (regional pattern)
-            expected: Detection → Resolution + Insight Routing → Learning
+            expected: Detection → Resolution → Employee Enablement → Learning
+            Key: urgency 4 → Route 1; store associate gave wrong price match info
+                 → frontline_gap_detected: true → EEA fires as sub-route of Resolution
 
-        Signal 4 — SIGNAL PATH D — HITL governance
+        Signal 4 — Route 1 — Resolution + HITL governance
             market: South America | source: support_ticket | category: product_quality
             urgency: 5 | pattern_risk: low (isolated defect)
             expected: Detection → Resolution → HITL pause → Learning
-            Key: customer mentions legal action → requires_human: true
+            Key: R$800 BRL value + explicit legal threat → requires_human: true
 
-        Signal 5 — SIGNAL PATH E — Employee Enablement
-            market: Europe | source: social_media | category: other
-            urgency: 3 | pattern_risk: medium
-            expected: Detection → Resolution → Employee Enablement → Learning
-            Key: contradictory staff info → frontline_gap_detected: true
+        Signal 5 — Route 2 — Insight Routing ONLY
+            market: Europe | source: app_review | category: other
+            urgency: 3 | pattern_risk: medium (loyalty policy confusion pattern)
+            expected: Detection → Insight Routing ONLY → Learning
+            Key: urgency ≤ 3 AND pattern_risk "medium" → Route 2; Resolution/EEA never run
 
     Returns:
         A list of exactly 5 signal dicts in demo-ready order.
@@ -519,7 +523,7 @@ async def generate_demo_set() -> list:
     """
     # Each tuple: (market, source, category, urgency_score, extra_hint, label, expected_path)
     demo_params = [
-        # ── SIGNAL PATH A — Resolution only ────────────────────────────────────
+        # ── SIGNAL 1 — Route 1: Resolution only ────────────────────────────────
         (
             "North America",
             "support_ticket",
@@ -536,7 +540,7 @@ async def generate_demo_set() -> list:
             "North America · service delay · urgency 5 · isolated",
             "Detection → Resolution → Learning",
         ),
-        # ── SIGNAL PATH B — Insight Routing ONLY (no Resolution) ───────────────
+        # ── SIGNAL 2 — Route 2: Insight Routing ONLY (no Resolution) ──────────
         (
             "Europe",
             "app_review",
@@ -556,25 +560,28 @@ async def generate_demo_set() -> list:
             "Europe · return portal outage · pattern HIGH · no urgent case",
             "Detection → Insight Routing ONLY → Learning",
         ),
-        # ── SIGNAL PATH C — Both paths ──────────────────────────────────────────
+        # ── SIGNAL 3 — Route 1: Resolution + Employee Enablement ───────────────
         (
             "Asia",
             "social_media",
             "price_dissatisfaction",
             4,
             (
-                "Angry individual customer in Singapore demanding an immediate price match. "
-                "Also clearly part of a regional pricing pattern across Southeast Asia "
-                "where Cosmic Mart prices are 30-40% above competitors like Lazada and "
-                "Shopee. The customer has seen hundreds of posts in regional Facebook "
-                "groups and Reddit threads confirming the pattern. Needs both individual "
-                "resolution AND escalation to the Pricing team as a business-wide pattern. "
-                "Tag @CosmicMart and use CAPS on the key frustration word or price figure."
+                "Angry individual customer in Singapore furious about a price discrepancy. "
+                "They visited the Cosmic Mart store and a store associate PROMISED them the "
+                "price would be matched to a competitor (Lazada). But when they checked the "
+                "Cosmic Mart app, the price was different — higher than what the associate "
+                "quoted. The store associate gave WRONG information about the price match "
+                "policy. Now the customer doesn't know which price is correct and feels misled "
+                "by staff. They are demanding the price they were verbally promised. "
+                "The staff clearly did not know the correct policy — make the frontline "
+                "knowledge gap very obvious. Tag @CosmicMart and use CAPS on the key "
+                "frustration word."
             ),
-            "Asia · price gap · urgency 4 · pattern HIGH · dual path",
-            "Detection → Resolution + Insight Routing → Learning",
+            "Asia · price mismatch · urgency 4 · staff gave wrong info",
+            "Detection → Resolution → Employee Enablement → Learning",
         ),
-        # ── SIGNAL PATH D — HITL governance ────────────────────────────────────
+        # ── SIGNAL 4 — Route 1: Resolution + HITL governance ───────────────────
         (
             "South America",
             "support_ticket",
@@ -595,24 +602,27 @@ async def generate_demo_set() -> list:
             "South America · product defect · urgency 5 · HITL required",
             "Detection → Resolution → HITL pause → Learning",
         ),
-        # ── SIGNAL PATH E — Employee Enablement ────────────────────────────────
+        # ── SIGNAL 5 — Route 2: Insight Routing ONLY (no Resolution) ──────────
         (
             "Europe",
-            "social_media",
+            "app_review",
             "other",
             3,
             (
-                "Customer received completely contradictory information from two Cosmic "
-                "Mart employees about the loyalty points redemption policy. A store "
-                "associate in the London Oxford Street store told them one thing; a "
-                "contact centre agent said the exact opposite. Neither could show a "
-                "written policy. This is a textbook frontline knowledge gap — the "
-                "root cause is employee policy confusion, NOT a system bug or product "
-                "defect. The customer is frustrated but not threatening to leave. "
-                "Moderate urgency only. Tag @CosmicMart. Keep it short and punchy."
+                "IMPORTANT: This is a LOW-TO-MODERATE urgency (3/5) individual complaint — "
+                "the customer is frustrated but NOT furious. Do NOT use extremely aggressive "
+                "language. The customer is writing a measured app review about confusion with "
+                "the Cosmic Mart loyalty points redemption policy. They tried to redeem points "
+                "in Berlin but the policy was unclear. CRITICALLY: they mention this seems to "
+                "be a widespread issue — they found dozens of recent app reviews and forum posts "
+                "from customers across Germany, France, and the Netherlands all reporting the "
+                "same loyalty policy confusion. The pattern is medium-scale and growing. "
+                "This is about systemic policy clarity, not an individual urgent case. "
+                "Keep tone measured and composed — urgency 3, not 5. "
+                "The star rating should reflect mild-to-moderate dissatisfaction (2 stars)."
             ),
-            "Europe · loyalty policy confusion · frontline gap",
-            "Detection → Resolution → Employee Enablement → Learning",
+            "Europe · loyalty policy confusion · pattern MEDIUM · insight only",
+            "Detection → Insight Routing ONLY → Learning",
         ),
     ]
 

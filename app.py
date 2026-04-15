@@ -109,14 +109,68 @@ AGENT_COLORS = {
     "Human Governance":           {"border":"#F59E0B","text":"#B45309","bg":"#FFFBEB","light":"#FEF3C7"},
 }
 
-# ROUTING — diagram logic: one entry per path (n, market, category, urgency, pattern, path_label)
+# ROUTING FIX — mutually exclusive ORC branches: one row per path
+# (n, market, category, urgency, pattern, route_label)
 DEMO_SIGNALS_META = [
-    (1, "North America", "service_delay",        5, "low",    "Resolution only"),       # SIGNAL PATH A
-    (2, "Europe",        "return_friction",       2, "high",   "Insight Routing only"),  # SIGNAL PATH B
-    (3, "Asia",          "price_dissatisfaction", 4, "high",   "Resolution + Insight"),  # SIGNAL PATH C
-    (4, "South America", "product_quality",       5, "low",    "Resolution + HITL"),     # SIGNAL PATH D
-    (5, "Europe",        "other",                 3, "medium", "Resolution + EEA"),      # SIGNAL PATH E
+    (1, "North America", "service_delay",        5, "low",    "Route 1 — Resolution"),      # SIGNAL PATH — Route 1 Resolution
+    (2, "Europe",        "return_friction",       2, "high",   "Route 2 — Insight only"),    # SIGNAL PATH — Route 2 Insight only
+    (3, "Asia",          "price_dissatisfaction", 4, "high",   "Route 1 — Resolution + EEA"),# SIGNAL PATH — Route 1 Resolution
+    (4, "South America", "product_quality",       5, "low",    "Route 1 — Resolution + HITL"),# SIGNAL PATH — Route 1 Resolution
+    (5, "Europe",        "other",                 3, "medium", "Route 2 — Insight only"),    # SIGNAL PATH — Route 2 Insight only
 ]
+
+# DIAGRAM — About tab
+MERMAID_DIAGRAM = """flowchart TD
+  SIG[Experience Signals VoC + Ops Data]:::ext
+  PII[PII Masking and Responsible AI]:::ext
+  ENT[Enterprise Systems CRM Contact Center Commerce]:::ext
+  DET["[Signal Detection Agent]"]:::agent
+  ORC["[Cosmic Pulse Orchestrator]"]:::agent
+  RES["[Resolution Agent]"]:::agent
+  EEA["[Employee Enablement Agent]"]:::agent
+  INS["[Insight Routing Agent]"]:::agent
+  LRN["[Learning Agent]"]:::agent
+  GOV["[Human in the Loop Governance]"]:::gov
+  T1(Pricing and Promotions):::stake
+  T2(Store Operations):::stake
+  T3(Merchandising and Assortment):::stake
+  T4(Returns and Policy Owners):::stake
+  T5(Support Leadership):::stake
+  OUT(Outcome Signals):::stake
+  CXO(CXO Visibility):::stake
+
+  SIG --> PII
+  PII --> DET
+  DET --> ORC
+  ORC -->|Single urgent customer case| RES
+  ORC -->|Repeated pattern across customers| INS
+  RES --> ENT
+  RES --> GOV
+  GOV --> ENT
+  RES --> EEA
+  EEA --> ENT
+  INS --> T1
+  INS --> T2
+  INS --> T3
+  INS --> T4
+  INS --> T5
+  ENT --> OUT
+  INS --> OUT
+  T1 -.-> OUT
+  T2 -.-> OUT
+  T3 -.-> OUT
+  T4 -.-> OUT
+  T5 -.-> OUT
+  OUT --> LRN
+  LRN --> RES
+  LRN --> INS
+  LRN --> CXO
+
+  classDef ext fill:#F3F4F6,stroke:#6B7280,color:#111827
+  classDef agent fill:#DBEAFE,stroke:#2563EB,color:#0F172A
+  classDef stake fill:#DCFCE7,stroke:#16A34A,color:#052E16
+  classDef gov fill:#FEF3C7,stroke:#D97706,color:#7C2D12
+"""
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Async runner
@@ -133,64 +187,50 @@ def _ts() -> str:
     return datetime.now().strftime("%H:%M:%S")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# ROUTING — diagram logic
-# Implements the 5 distinct paths shown in the Cosmic Pulse architecture diagram.
+# ROUTING FIX — mutually exclusive ORC branches
+# The Orchestrator chooses ONE route: Resolution OR Insight Routing, never both.
 # ─────────────────────────────────────────────────────────────────────────────
 def compute_routing(urgency: int, pattern_risk: str) -> tuple:
     """
-    Returns (run_resolution, run_insight_routing, routing_path, routing_reason).
+    Strictly follows the diagram arrows:
+        ORC -->|Single urgent customer case| RES
+        ORC -->|Repeated pattern across customers| INS
+    Returns (route, routing_label, routing_reason).
+    route == "resolution"  OR  "insight" — never both simultaneously.
 
-    SIGNAL PATH A — Resolution only         : urgency >= 4 AND pattern_risk == "low"
-    SIGNAL PATH B — Insight Routing only    : urgency <= 3 AND pattern_risk == "high"
-    SIGNAL PATH C — Resolution + Insight    : urgency >= 4 AND pattern_risk in medium/high
-    SIGNAL PATH D — HITL (post-Resolution)  : Resolution returns requires_human == true
-    SIGNAL PATH E — EEA  (post-Resolution)  : Resolution returns frontline_gap_detected == true
-    Default                                 : Resolution only
+    SIGNAL PATH — Route 1 Resolution  : urgency >= 4
+    SIGNAL PATH — Route 2 Insight only: pattern_risk medium/high AND urgency <= 3
+    Default                           : Resolution (low urgency + low pattern)
     """
-    # SIGNAL PATH B — Insight Routing ONLY
-    # Low urgency + high pattern = pure pattern escalation, skip individual Resolution
-    if urgency <= 3 and pattern_risk == "high":
+    # SIGNAL PATH — Route 1 Resolution
+    # urgency 4 or 5 = urgent individual customer case
+    if urgency >= 4:
         return (
-            False,
-            True,
-            "Insight Routing only (repeated pattern)",
-            (f"Urgency {urgency} is below resolution threshold. "
-             f"Pattern risk '{pattern_risk}' triggers Insight Routing. "
-             f"No individual resolution needed — this is a "
-             f"business-wide pattern requiring team escalation."),
+            "resolution",
+            "Single urgent customer case",
+            (f"urgency_score {urgency} indicates an urgent individual customer case. "
+             f"Routing to Resolution Agent. "
+             f"Insight Routing Agent: not triggered."),
         )
 
-    # SIGNAL PATH A — Resolution ONLY
-    # High urgency + low pattern = single urgent case, no pattern escalation
-    if urgency >= 4 and pattern_risk == "low":
+    # SIGNAL PATH — Route 2 Insight only
+    # Low urgency + medium/high pattern = repeated pattern across customers
+    if pattern_risk in ("medium", "high") and urgency <= 3:
         return (
-            True,
-            False,
-            "Resolution only (single urgent case)",
-            (f"Urgency {urgency} triggers Resolution. "
-             f"Pattern risk '{pattern_risk}' — isolated incident, "
-             f"no pattern escalation needed."),
+            "insight",
+            "Repeated pattern across customers",
+            (f"pattern_risk '{pattern_risk}' with urgency_score {urgency} indicates a "
+             f"repeated pattern across customers, not an urgent individual case. "
+             f"Routing to Insight Routing Agent. "
+             f"Resolution Agent: not triggered."),
         )
 
-    # SIGNAL PATH C — Both Resolution AND Insight Routing
-    # High urgency + medium/high pattern = both paths run in parallel
-    if urgency >= 4 and pattern_risk in ("medium", "high"):
-        return (
-            True,
-            True,
-            "Resolution + Insight Routing (urgent case + pattern)",
-            (f"Urgency {urgency} triggers Resolution for the individual customer. "
-             f"Pattern risk '{pattern_risk}' also triggers Insight Routing "
-             f"for the business pattern. Both paths run in parallel."),
-        )
-
-    # Default — Resolution only for everything else
+    # Default — low urgency, low pattern → Resolution (standard individual case)
     return (
-        True,
-        False,
-        "Resolution (standard case)",
-        (f"Urgency {urgency}, pattern risk '{pattern_risk}'. "
-         f"Standard resolution path."),
+        "resolution",
+        "Single customer case (standard)",
+        (f"urgency_score {urgency}, pattern_risk '{pattern_risk}'. "
+         f"Routing to Resolution Agent."),
     )
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -287,46 +327,46 @@ def step_indicator_html(current: int, total: int = 5) -> str:
     return f'<div style="display:flex;align-items:center;margin-bottom:1.25rem;">{"".join(parts)}</div>'
 
 
-# FIX 4 — Routing pathway card
-def routing_pathway_card_html(urgency: int, pattern_risk: str,
-                               run_resolution: bool, run_insight_routing: bool,
-                               routing_path: str = "", routing_reason: str = "") -> str:
-    """Show which agents will fire for this signal before they run.
-    routing_path / routing_reason come from compute_routing(); if not supplied
-    they are derived here so existing call sites without them still work.
+# ROUTING FIX — mutually exclusive ORC branches: routing pathway card
+def routing_pathway_card_html(route: str, routing_label: str, routing_reason: str,
+                               urgency: int, pattern_risk: str) -> str:
     """
-    # ROUTING — diagram logic: derive labels if caller did not supply them
-    if not routing_path:
-        _, _, routing_path, routing_reason = compute_routing(urgency, pattern_risk)
-
-    def node(label, active, conditional=False):
-        if active:
-            bg,tc,border = "#EDE9FE","#6D28D9","#8B5CF6"
-        elif conditional:
-            bg,tc,border = "#F5F3FF","#8B5CF6","#C4B5FD"
-        else:
-            bg,tc,border = "#F1F5F9","#94A3B8","#E2E8F0"
-        return (f'<span style="background:{bg};color:{tc};border:1.5px solid {border};'
-                f'padding:4px 10px;border-radius:8px;font-size:.72rem;font-weight:600;'
-                f'white-space:nowrap;">{label}</span>')
-
-    arrow = '<span style="color:#6D28D9;font-weight:700;margin:0 4px;">→</span>'
-
-    nodes_html = (
-        node("Signal Detection", True)
-        + arrow
-        + node("Resolution", run_resolution)
-        + arrow
-        + node("EEA*", run_resolution, conditional=True)
-        + arrow
-        + node("Insight Routing", run_insight_routing)
-        + arrow
-        + node("Learning", True)
-    )
-
+    Shows ONLY the active route. The inactive route is shown in gray as 'not triggered'.
+    Strictly mirrors the diagram's two mutually exclusive ORC arrows.
+    """
     urg_t, urg_bg = urgency_color(urgency)
     pr_bg  = "#FEE2E2" if pattern_risk=="high" else "#FEF3C7" if pattern_risk=="medium" else "#DCFCE7"
     pr_col = "#DC2626" if pattern_risk=="high" else "#D97706" if pattern_risk=="medium" else "#059669"
+
+    def active_node(label):
+        return (f'<span style="background:#EDE9FE;color:#6D28D9;border:1.5px solid #8B5CF6;'
+                f'padding:4px 10px;border-radius:8px;font-size:.72rem;font-weight:600;'
+                f'white-space:nowrap;">{label}</span>')
+
+    def not_triggered(label):
+        return (f'<span style="color:#9CA3AF;font-size:.75rem;font-style:italic;">'
+                f'{label}: not triggered</span>')
+
+    arrow = '<span style="color:#6D28D9;font-weight:700;margin:0 4px;">→</span>'
+
+    if route == "resolution":
+        # SIGNAL PATH — Route 1 Resolution
+        path_html = (active_node("Signal Detection")
+                     + arrow + active_node("Resolution Agent")
+                     + arrow + active_node("Enterprise Systems")
+                     + arrow + active_node("Learning Agent"))
+        inactive_html = not_triggered("Insight Routing Agent")
+        note = "EEA fires after Resolution if frontline_gap_detected = true. HITL fires if requires_human = true."
+    else:
+        # SIGNAL PATH — Route 2 Insight only
+        path_html = (active_node("Signal Detection")
+                     + arrow + active_node("Insight Routing Agent")
+                     + arrow + active_node("T1–T5 Teams")
+                     + arrow + active_node("Learning Agent"))
+        inactive_html = (not_triggered("Resolution Agent")
+                         + ' <span style="color:#9CA3AF;font-size:.75rem;">&nbsp;·&nbsp;</span> '
+                         + not_triggered("Employee Enablement Agent"))
+        note = "Resolution Agent and EEA are not called on this path."
 
     return (
         f'<div style="border-left:3px solid #8B5CF6;border-radius:10px;padding:1rem 1.25rem;'
@@ -339,12 +379,14 @@ def routing_pathway_card_html(urgency: int, pattern_risk: str,
         f'font-size:.7rem;font-weight:600;">risk: {pattern_risk}</span>'
         f'</div>'
         f'<div style="font-size:.82rem;font-weight:700;color:#1E1B4B;margin-bottom:.5rem;">'
-        f'{routing_path}</div>'
-        f'<div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px;margin-bottom:.5rem;">'
-        f'{nodes_html}</div>'
+        f'Orchestrator → {routing_label}</div>'
+        f'<div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px;margin-bottom:.45rem;">'
+        f'{path_html}</div>'
+        f'<div style="margin-bottom:.4rem;">{inactive_html}</div>'
         f'<p style="color:#64748B;font-size:.75rem;margin:0;line-height:1.6;">'
-        f'{routing_reason} &nbsp;·&nbsp; *EEA fires only if Resolution detects a frontline gap.'
-        f'</p></div>'
+        f'{routing_reason}</p>'
+        f'<p style="color:#94A3B8;font-size:.7rem;margin:.25rem 0 0 0;font-style:italic;">{note}</p>'
+        f'</div>'
     )
 
 
@@ -506,13 +548,16 @@ for _k, _v in _defaults.items():
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _run_post_hitl_agents(signal, detection_result, resolution_result,
-                          run_insight_routing, frontline_gap, hitl_decision,
-                          slot_eea, slot_ir, slot_ln):
+                          frontline_gap, hitl_decision,
+                          slot_eea, slot_ln):
     """
-    FIX 1 — EEA and Insight Routing routing is driven by Python flags, not LLM.
-    Returns (eea_result, insight_result, learning_result, ts_eea, ts_ir, ts_ln).
+    ROUTING FIX — mutually exclusive ORC branches.
+    Post-Resolution phase: EEA (if frontline gap) + Learning Agent.
+    Insight Routing is NEVER called here — it belongs to Route 2 only,
+    and this function is only reached on Route 1 (Resolution path).
+    Returns (eea_result, learning_result, ts_eea, ts_ln).
     """
-    # FIX 1 Rule D — Employee Enablement: triggered by frontline_gap only
+    # Employee Enablement: triggered only if Resolution detected a frontline gap
     eea_result = None; ts_eea = None
     if frontline_gap:
         slot_eea.markdown(running_card_html("Employee Enablement Agent"), unsafe_allow_html=True)
@@ -523,18 +568,7 @@ def _run_post_hitl_agents(signal, detection_result, resolution_result,
     else:
         slot_eea.markdown(agent_card_html("Employee Enablement Agent", None, False), unsafe_allow_html=True)
 
-    # FIX 1 Rule B — Insight Routing: triggered by run_insight_routing flag
-    insight_result = None; ts_ir = None
-    if run_insight_routing:
-        slot_ir.markdown(running_card_html("Insight Routing Agent"), unsafe_allow_html=True)
-        with st.spinner("Insight Routing Agent running…"):
-            insight_result = run_async(insight_routing_agent(detection_result))
-        ts_ir = _ts()
-        slot_ir.markdown(agent_card_html("Insight Routing Agent", insight_result, True, ts_ir), unsafe_allow_html=True)
-    else:
-        slot_ir.markdown(agent_card_html("Insight Routing Agent", None, False), unsafe_allow_html=True)
-
-    # Learning always runs last
+    # Learning always runs last; Insight Routing output is always None on Route 1
     hitl_flag = hitl_decision not in ("not_triggered","")
     learning_input = json.dumps({
         "market":                     signal.get("market","Unknown"),
@@ -545,7 +579,7 @@ def _run_post_hitl_agents(signal, detection_result, resolution_result,
         "signal_detection_output":    detection_result,
         "resolution_output":          resolution_result,
         "employee_enablement_output": eea_result,
-        "insight_routing_output":     insight_result,
+        "insight_routing_output":     None,
         "hitl_triggered":             hitl_flag,
         "hitl_decision":              hitl_decision,
         "hitl_action_proposed":       st.session_state.get("_partial_action",""),
@@ -559,34 +593,33 @@ def _run_post_hitl_agents(signal, detection_result, resolution_result,
     slot_ln.markdown(agent_card_html("Learning and Insights Agent", learning_result, True, ts_ln), unsafe_allow_html=True)
 
     st.session_state.pipeline_progress = 1.0
-    return eea_result, insight_result, learning_result, ts_eea, ts_ir, ts_ln
+    return eea_result, learning_result, ts_eea, ts_ln
 
 
 def run_pipeline_ui(signal: dict) -> None:
     """
-    FIX 1 — routing from Python.
-    FIX 3 — HITL: sets hitl_decision='pending', calls st.rerun() to pause.
-    FIX 4 — routing pathway card shown after Signal Detection.
+    ROUTING FIX — mutually exclusive ORC branches.
+    Orchestrator chooses ONE route: Resolution OR Insight Routing, never both.
     """
     st.session_state.pipeline_progress = 0.1
     st.markdown('<h3 style="color:#0F172A;font-size:1rem;font-weight:700;margin-bottom:.75rem;">'
                 '🤖 Agent Pipeline</h3>', unsafe_allow_html=True)
 
     slot_sd     = st.empty()
-    slot_route  = st.empty()   # FIX 4
+    slot_route  = st.empty()
     slot_res    = st.empty()
-    slot_hitl   = st.empty()   # FIX 3
+    slot_hitl   = st.empty()
     slot_eea    = st.empty()
     slot_ir     = st.empty()
     slot_ln     = st.empty()
-    slot_journey= st.empty()   # FIX 5
+    slot_journey= st.empty()
 
     for slot, name in [(slot_sd,"Signal Detection Agent"),(slot_res,"Resolution Agent"),
                        (slot_eea,"Employee Enablement Agent"),(slot_ir,"Insight Routing Agent"),
                        (slot_ln,"Learning and Insights Agent")]:
         slot.markdown(pending_card_html(name), unsafe_allow_html=True)
 
-    # ── Step 1: Signal Detection (always) ──────────────────────────────────
+    # ── Step 1: Signal Detection (always runs first) ───────────────────────
     slot_sd.markdown(running_card_html("Signal Detection Agent"), unsafe_allow_html=True)
     with st.spinner("Signal Detection Agent running…"):
         detection_result = run_async(signal_detection_agent(signal["query"]))
@@ -602,21 +635,23 @@ def run_pipeline_ui(signal: dict) -> None:
         pattern_risk = "low"
         urgency      = signal.get("urgency_score",3)
 
-    # ROUTING — diagram logic: deterministic Python, not LLM-driven
-    run_resolution, run_insight_routing, routing_path, routing_reason = compute_routing(urgency, pattern_risk)
+    # ROUTING FIX — mutually exclusive ORC branches
+    route, routing_label, routing_reason = compute_routing(urgency, pattern_risk)
 
-    # Show routing pathway card before agents run
+    # Show routing decision card before any agent runs
     slot_route.markdown(
-        routing_pathway_card_html(urgency, pattern_risk, run_resolution, run_insight_routing,
-                                  routing_path, routing_reason),
+        routing_pathway_card_html(route, routing_label, routing_reason, urgency, pattern_risk),
         unsafe_allow_html=True)
 
-    # ── Step 2: Resolution (conditional per routing rules) ─────────────────
+    # ── Step 2: Execute EXACTLY ONE route ─────────────────────────────────
     resolution_result = None; ts_res = None
+    insight_result    = None; ts_ir  = None
+    eea_result        = None; ts_eea = None
     frontline_gap = False; requires_human = False
     action_taken = "N/A"; customer_msg = "N/A"
 
-    if run_resolution:
+    if route == "resolution":
+        # SIGNAL PATH — Route 1 Resolution
         slot_res.markdown(running_card_html("Resolution Agent"), unsafe_allow_html=True)
         with st.spinner("Resolution Agent running…"):
             resolution_result = run_async(resolution_agent(detection_result))
@@ -633,38 +668,72 @@ def run_pipeline_ui(signal: dict) -> None:
         except Exception:
             pass
 
-        # FIX 3 — HITL: genuine pause via st.rerun() + st.stop()
+        # HITL: genuine pause via st.rerun() + st.stop()
         if requires_human:
             slot_hitl.markdown(
                 '<div style="padding:.6rem 1rem;background:#FEF3C7;border-radius:8px;'
                 'color:#B45309;font-size:.82rem;font-weight:600;">⏳ Awaiting human approval…</div>',
                 unsafe_allow_html=True)
-            st.session_state._partial_detection         = detection_result
-            st.session_state._partial_resolution        = resolution_result
-            st.session_state._partial_run_insight_routing = run_insight_routing
-            st.session_state._partial_frontline_gap     = frontline_gap
-            st.session_state._partial_action            = action_taken
-            st.session_state._partial_customer_msg      = customer_msg
-            st.session_state._partial_urgency           = urgency
-            st.session_state._partial_pattern_risk      = pattern_risk
-            st.session_state._partial_ts_sd             = ts_sd
-            st.session_state._partial_ts_res            = ts_res
-            st.session_state.hitl_triggered             = True
-            st.session_state.pipeline_paused            = True
-            st.session_state.hitl_decision              = "pending"   # FIX 3
-            st.session_state.pipeline_status            = "paused_hitl"
-            st.session_state.current_signal             = signal
+            st.session_state._partial_detection      = detection_result
+            st.session_state._partial_resolution     = resolution_result
+            st.session_state._partial_route          = route
+            st.session_state._partial_routing_label  = routing_label
+            st.session_state._partial_routing_reason = routing_reason
+            st.session_state._partial_frontline_gap  = frontline_gap
+            st.session_state._partial_action         = action_taken
+            st.session_state._partial_customer_msg   = customer_msg
+            st.session_state._partial_urgency        = urgency
+            st.session_state._partial_pattern_risk   = pattern_risk
+            st.session_state._partial_ts_sd          = ts_sd
+            st.session_state._partial_ts_res         = ts_res
+            st.session_state.hitl_triggered          = True
+            st.session_state.pipeline_paused         = True
+            st.session_state.hitl_decision           = "pending"
+            st.session_state.pipeline_status         = "paused_hitl"
+            st.session_state.current_signal          = signal
             st.rerun()
             return
-    else:
-        slot_res.markdown(agent_card_html("Resolution Agent", None, False), unsafe_allow_html=True)
 
-    # ── Steps 3-5: EEA → Insight Routing → Learning ────────────────────────
-    eea_result, insight_result, learning_result, ts_eea, ts_ir, ts_ln = _run_post_hitl_agents(
-        signal, detection_result, resolution_result,
-        run_insight_routing, frontline_gap, "not_triggered",
-        slot_eea, slot_ir, slot_ln,
-    )
+        # Insight Routing is not triggered on Route 1
+        slot_ir.markdown(agent_card_html("Insight Routing Agent", None, False), unsafe_allow_html=True)
+
+        # EEA + Learning
+        eea_result, learning_result, ts_eea, ts_ln = _run_post_hitl_agents(
+            signal, detection_result, resolution_result,
+            frontline_gap, "not_triggered",
+            slot_eea, slot_ln,
+        )
+
+    else:
+        # SIGNAL PATH — Route 2 Insight only
+        # Resolution Agent is NOT called on this route
+        slot_res.markdown(agent_card_html("Resolution Agent", None, False), unsafe_allow_html=True)
+        slot_eea.markdown(agent_card_html("Employee Enablement Agent", None, False), unsafe_allow_html=True)
+
+        slot_ir.markdown(running_card_html("Insight Routing Agent"), unsafe_allow_html=True)
+        with st.spinner("Insight Routing Agent running…"):
+            insight_result = run_async(insight_routing_agent(detection_result))
+        ts_ir = _ts()
+        slot_ir.markdown(agent_card_html("Insight Routing Agent", insight_result, True, ts_ir), unsafe_allow_html=True)
+        st.session_state.pipeline_progress = 0.5
+
+        learning_input = json.dumps({
+            "market":                     signal.get("market","Unknown"),
+            "source":                     signal.get("source","unknown"),
+            "category":                   signal.get("category","other"),
+            "urgency_score":              signal.get("urgency_score",3),
+            "original_signal":            signal.get("query",""),
+            "signal_detection_output":    detection_result,
+            "resolution_output":          None,
+            "employee_enablement_output": None,
+            "insight_routing_output":     insight_result,
+        })
+        slot_ln.markdown(running_card_html("Learning and Insights Agent"), unsafe_allow_html=True)
+        with st.spinner("Learning and Insights Agent running…"):
+            learning_result = run_async(learning_insights_agent(learning_input))
+        ts_ln = _ts()
+        slot_ln.markdown(agent_card_html("Learning and Insights Agent", learning_result, True, ts_ln), unsafe_allow_html=True)
+        st.session_state.pipeline_progress = 1.0
 
     results = {
         "signal_detection_output":    detection_result,
@@ -672,10 +741,13 @@ def run_pipeline_ui(signal: dict) -> None:
         "employee_enablement_output": eea_result,
         "insight_routing_output":     insight_result,
         "learning_output":            learning_result,
+        "_meta_route":                route,
+        "_meta_routing_label":        routing_label,
+        "_meta_routing_reason":       routing_reason,
         "_meta_urgency":              urgency,
         "_meta_pattern_risk":         pattern_risk,
-        "_meta_run_resolution":       run_resolution,
-        "_meta_run_insight_routing":  run_insight_routing,
+        "_meta_run_resolution":       (route == "resolution"),
+        "_meta_run_insight_routing":  (route == "insight"),
         "_meta_frontline_gap":        frontline_gap,
         "_meta_hitl_triggered":       False,
         "_meta_hitl_decision":        "not_triggered",
@@ -687,7 +759,6 @@ def run_pipeline_ui(signal: dict) -> None:
     st.session_state.pipeline_complete = True
     st.session_state.pipeline_status   = "complete"
 
-    # FIX 5 — Case journey summary
     slot_journey.markdown(case_journey_summary_html(signal, results), unsafe_allow_html=True)
 
 
@@ -700,14 +771,16 @@ def render_hitl_paused_ui() -> None:
     st.markdown('<h3 style="color:#0F172A;font-size:1rem;font-weight:700;margin-bottom:.75rem;">'
                 '🤖 Agent Pipeline</h3>', unsafe_allow_html=True)
 
-    ts_sd  = st.session_state.get("_partial_ts_sd")
-    ts_res = st.session_state.get("_partial_ts_res")
-    urgency      = st.session_state.get("_partial_urgency", 3)
-    pattern_risk = st.session_state.get("_partial_pattern_risk","low")
-    run_resolution, run_insight_routing, routing_path, routing_reason = compute_routing(urgency, pattern_risk)
+    ts_sd          = st.session_state.get("_partial_ts_sd")
+    ts_res         = st.session_state.get("_partial_ts_res")
+    urgency        = st.session_state.get("_partial_urgency", 3)
+    pattern_risk   = st.session_state.get("_partial_pattern_risk","low")
+    route          = st.session_state.get("_partial_route", "resolution")
+    routing_label  = st.session_state.get("_partial_routing_label", "Single urgent customer case")
+    routing_reason = st.session_state.get("_partial_routing_reason", "")
 
-    st.markdown(routing_pathway_card_html(urgency, pattern_risk, run_resolution, run_insight_routing,
-                                          routing_path, routing_reason),
+    # ROUTING FIX — use stored route from Phase 1
+    st.markdown(routing_pathway_card_html(route, routing_label, routing_reason, urgency, pattern_risk),
                 unsafe_allow_html=True)
     st.markdown(agent_card_html("Signal Detection Agent",
                                 st.session_state._partial_detection, True, ts_sd), unsafe_allow_html=True)
@@ -753,26 +826,28 @@ def render_hitl_paused_ui() -> None:
 
 
 def run_pipeline_phase2(signal: dict) -> None:
-    """FIX 3 — Resume pipeline after HITL decision. FIX 5 — adds journey summary."""
+    """Resume pipeline after HITL decision (always Route 1 — Resolution path)."""
     st.markdown('<h3 style="color:#0F172A;font-size:1rem;font-weight:700;margin-bottom:.75rem;">'
                 '🤖 Agent Pipeline</h3>', unsafe_allow_html=True)
 
     decision          = st.session_state.hitl_decision
     detection_result  = st.session_state._partial_detection
     resolution_result = st.session_state._partial_resolution
-    run_insight_routing = st.session_state._partial_run_insight_routing
     frontline_gap     = st.session_state._partial_frontline_gap
     action_taken      = st.session_state._partial_action
     urgency           = st.session_state.get("_partial_urgency", signal.get("urgency_score",3))
     pattern_risk      = st.session_state.get("_partial_pattern_risk","low")
+    route             = st.session_state.get("_partial_route", "resolution")
+    routing_label     = st.session_state.get("_partial_routing_label", "Single urgent customer case")
+    routing_reason    = st.session_state.get("_partial_routing_reason", "")
     ts_sd             = st.session_state.get("_partial_ts_sd")
     ts_res            = st.session_state.get("_partial_ts_res")
 
-    st.markdown(routing_pathway_card_html(urgency, pattern_risk, True, run_insight_routing),
+    # ROUTING FIX — always Route 1 here (HITL is a sub-route of Resolution)
+    st.markdown(routing_pathway_card_html(route, routing_label, routing_reason, urgency, pattern_risk),
                 unsafe_allow_html=True)
     st.markdown(agent_card_html("Signal Detection Agent", detection_result, True, ts_sd), unsafe_allow_html=True)
     st.markdown(agent_card_html("Resolution Agent", resolution_result, True, ts_res), unsafe_allow_html=True)
-    # FIX 3 — HITL result banner persists
     st.markdown(hitl_result_card_html(decision, action_taken), unsafe_allow_html=True)
 
     if decision == "approved":
@@ -781,16 +856,20 @@ def run_pipeline_phase2(signal: dict) -> None:
         st.warning("⚠️ Human rejected — case escalated to human representative. "
                    "Learning Agent records this override.")
 
-    slot_eea = st.empty(); slot_ir = st.empty(); slot_ln = st.empty()
-    for slot, name in [(slot_eea,"Employee Enablement Agent"),
-                       (slot_ir,"Insight Routing Agent"),(slot_ln,"Learning and Insights Agent")]:
+    # Insight Routing is never called after HITL (we are on Route 1)
+    slot_ir = st.empty()
+    slot_ir.markdown(agent_card_html("Insight Routing Agent", None, False), unsafe_allow_html=True)
+
+    slot_eea = st.empty(); slot_ln = st.empty()
+    for slot, name in [(slot_eea,"Employee Enablement Agent"),(slot_ln,"Learning and Insights Agent")]:
         slot.markdown(pending_card_html(name), unsafe_allow_html=True)
 
-    eea_result, insight_result, learning_result, ts_eea, ts_ir, ts_ln = _run_post_hitl_agents(
+    eea_result, learning_result, ts_eea, ts_ln = _run_post_hitl_agents(
         signal, detection_result, resolution_result,
-        run_insight_routing, frontline_gap, decision,
-        slot_eea, slot_ir, slot_ln,
+        frontline_gap, decision,
+        slot_eea, slot_ln,
     )
+    insight_result = None; ts_ir = None
 
     results = {
         "signal_detection_output":    detection_result,
@@ -798,10 +877,13 @@ def run_pipeline_phase2(signal: dict) -> None:
         "employee_enablement_output": eea_result,
         "insight_routing_output":     insight_result,
         "learning_output":            learning_result,
+        "_meta_route":                route,
+        "_meta_routing_label":        routing_label,
+        "_meta_routing_reason":       routing_reason,
         "_meta_urgency":              urgency,
         "_meta_pattern_risk":         pattern_risk,
         "_meta_run_resolution":       True,
-        "_meta_run_insight_routing":  run_insight_routing,
+        "_meta_run_insight_routing":  False,
         "_meta_frontline_gap":        frontline_gap,
         "_meta_hitl_triggered":       True,
         "_meta_hitl_decision":        decision,
@@ -812,7 +894,6 @@ def run_pipeline_phase2(signal: dict) -> None:
     st.session_state.pipeline_results  = results
     st.session_state.pipeline_complete = True
     st.session_state.pipeline_status   = "complete"
-    # FIX 5
     st.markdown(case_journey_summary_html(signal, results), unsafe_allow_html=True)
 
 
@@ -821,12 +902,15 @@ def display_pipeline_from_state(results: dict) -> None:
     st.markdown('<h3 style="color:#0F172A;font-size:1rem;font-weight:700;margin-bottom:.75rem;">'
                 '🤖 Agent Pipeline</h3>', unsafe_allow_html=True)
 
-    urgency      = results.get("_meta_urgency",3)
-    pattern_risk = results.get("_meta_pattern_risk","low")
-    run_resolution      = results.get("_meta_run_resolution", True)
-    run_insight_routing = results.get("_meta_run_insight_routing", False)
+    urgency        = results.get("_meta_urgency",3)
+    pattern_risk   = results.get("_meta_pattern_risk","low")
+    # ROUTING FIX — derive route from stored _meta_route (backward compat fallback)
+    route          = results.get("_meta_route") or ("resolution" if results.get("_meta_run_resolution", True) else "insight")
+    routing_label  = results.get("_meta_routing_label", "Single urgent customer case")
+    routing_reason = results.get("_meta_routing_reason", "")
+    run_resolution = (route == "resolution")
 
-    st.markdown(routing_pathway_card_html(urgency, pattern_risk, run_resolution, run_insight_routing),
+    st.markdown(routing_pathway_card_html(route, routing_label, routing_reason, urgency, pattern_risk),
                 unsafe_allow_html=True)
     st.markdown(agent_card_html("Signal Detection Agent",
                                 results.get("signal_detection_output"), True,
@@ -885,10 +969,13 @@ def display_demo_results_from_state() -> None:
 
         urgency_v      = r.get("_meta_urgency", urg)
         pattern_risk_v = r.get("_meta_pattern_risk","low")
-        run_res_v      = r.get("_meta_run_resolution", True)
-        run_ir_v       = r.get("_meta_run_insight_routing", False)
+        # ROUTING FIX — derive route for display
+        route_v         = r.get("_meta_route") or ("resolution" if r.get("_meta_run_resolution", True) else "insight")
+        routing_label_v = r.get("_meta_routing_label", "Single urgent customer case")
+        routing_reason_v= r.get("_meta_routing_reason", "")
+        run_res_v       = (route_v == "resolution")
 
-        st.markdown(routing_pathway_card_html(urgency_v, pattern_risk_v, run_res_v, run_ir_v),
+        st.markdown(routing_pathway_card_html(route_v, routing_label_v, routing_reason_v, urgency_v, pattern_risk_v),
                     unsafe_allow_html=True)
         st.markdown(agent_card_html("Signal Detection Agent", r.get("signal_detection_output"), True, r.get("_meta_ts_sd")), unsafe_allow_html=True)
         st.markdown(agent_card_html("Resolution Agent", r.get("resolution_output"), run_res_v, r.get("_meta_ts_res")), unsafe_allow_html=True)
@@ -967,17 +1054,19 @@ def _run_live_demo() -> None:
         except Exception:
             pattern_risk = "low"; urgency_v = urg
 
-        # ROUTING — diagram logic
-        run_resolution, run_insight_routing, routing_path, routing_reason = compute_routing(urgency_v, pattern_risk)
+        # ROUTING FIX — mutually exclusive ORC branches
+        route, routing_label, routing_reason = compute_routing(urgency_v, pattern_risk)
         slot_route.markdown(
-            routing_pathway_card_html(urgency_v, pattern_risk, run_resolution, run_insight_routing,
-                                      routing_path, routing_reason),
+            routing_pathway_card_html(route, routing_label, routing_reason, urgency_v, pattern_risk),
             unsafe_allow_html=True)
 
         resolution_result = None; ts_res = None
+        insight_result    = None; ts_ir  = None
+        eea_result        = None; ts_eea = None
         frontline_gap = False; requires_human = False; action_taken = ""
 
-        if run_resolution:
+        if route == "resolution":
+            # SIGNAL PATH — Route 1 Resolution
             slot_res.markdown(running_card_html("Resolution Agent"), unsafe_allow_html=True)
             resolution_result = run_async(resolution_agent(detection_result))
             ts_res = _ts()
@@ -989,37 +1078,52 @@ def _run_live_demo() -> None:
                 action_taken   = rj.get("action_taken","")
             except Exception:
                 pass
-        else:
-            slot_res.markdown(agent_card_html("Resolution Agent", None, False), unsafe_allow_html=True)
 
-        eea_result = None; ts_eea = None
-        if frontline_gap:
-            slot_eea.markdown(running_card_html("Employee Enablement Agent"), unsafe_allow_html=True)
-            eea_result = run_async(employee_enablement_agent(resolution_result or "{}"))
-            ts_eea = _ts()
-            slot_eea.markdown(agent_card_html("Employee Enablement Agent", eea_result, True, ts_eea), unsafe_allow_html=True)
+            # In Live Demo: HITL is auto-approved to keep presentation flowing
+            if requires_human:
+                st.markdown(hitl_result_card_html("auto_approved_demo", action_taken), unsafe_allow_html=True)
+
+            # Insight Routing not triggered on Route 1
+            slot_ir.markdown(agent_card_html("Insight Routing Agent", None, False), unsafe_allow_html=True)
+
+            # EEA (if frontline gap)
+            if frontline_gap:
+                slot_eea.markdown(running_card_html("Employee Enablement Agent"), unsafe_allow_html=True)
+                eea_result = run_async(employee_enablement_agent(resolution_result or "{}"))
+                ts_eea = _ts()
+                slot_eea.markdown(agent_card_html("Employee Enablement Agent", eea_result, True, ts_eea), unsafe_allow_html=True)
+            else:
+                slot_eea.markdown(agent_card_html("Employee Enablement Agent", None, False), unsafe_allow_html=True)
+
+            learning_input = json.dumps({
+                "market": signal.get("market","Unknown"), "source": signal.get("source","unknown"),
+                "category": signal.get("category","other"), "urgency_score": signal.get("urgency_score",3),
+                "original_signal": signal["query"], "signal_detection_output": detection_result,
+                "resolution_output": resolution_result, "employee_enablement_output": eea_result,
+                "insight_routing_output": None,
+                "hitl_triggered": requires_human,
+                "hitl_decision": "auto_approved_demo" if requires_human else "not_triggered",
+                "hitl_action_proposed": action_taken,
+            })
+
         else:
+            # SIGNAL PATH — Route 2 Insight only
+            slot_res.markdown(agent_card_html("Resolution Agent", None, False), unsafe_allow_html=True)
             slot_eea.markdown(agent_card_html("Employee Enablement Agent", None, False), unsafe_allow_html=True)
 
-        insight_result = None; ts_ir = None
-        if run_insight_routing:
             slot_ir.markdown(running_card_html("Insight Routing Agent"), unsafe_allow_html=True)
             insight_result = run_async(insight_routing_agent(detection_result))
             ts_ir = _ts()
             slot_ir.markdown(agent_card_html("Insight Routing Agent", insight_result, True, ts_ir), unsafe_allow_html=True)
-        else:
-            slot_ir.markdown(agent_card_html("Insight Routing Agent", None, False), unsafe_allow_html=True)
 
-        learning_input = json.dumps({
-            "market": signal.get("market","Unknown"), "source": signal.get("source","unknown"),
-            "category": signal.get("category","other"), "urgency_score": signal.get("urgency_score",3),
-            "original_signal": signal["query"], "signal_detection_output": detection_result,
-            "resolution_output": resolution_result, "employee_enablement_output": eea_result,
-            "insight_routing_output": insight_result,
-            "hitl_triggered": requires_human,
-            "hitl_decision": "auto_approved_demo" if requires_human else "not_triggered",
-            "hitl_action_proposed": action_taken,
-        })
+            learning_input = json.dumps({
+                "market": signal.get("market","Unknown"), "source": signal.get("source","unknown"),
+                "category": signal.get("category","other"), "urgency_score": signal.get("urgency_score",3),
+                "original_signal": signal["query"], "signal_detection_output": detection_result,
+                "resolution_output": None, "employee_enablement_output": None,
+                "insight_routing_output": insight_result,
+            })
+
         slot_ln.markdown(running_card_html("Learning and Insights Agent"), unsafe_allow_html=True)
         learning_result = run_async(learning_insights_agent(learning_input))
         ts_ln = _ts()
@@ -1032,20 +1136,22 @@ def _run_live_demo() -> None:
             "employee_enablement_output": eea_result,
             "insight_routing_output":     insight_result,
             "learning_output":            learning_result,
+            "_meta_route":                route,
+            "_meta_routing_label":        routing_label,
+            "_meta_routing_reason":       routing_reason,
             "_meta_urgency":              urgency_v,
             "_meta_pattern_risk":         pattern_risk,
-            "_meta_run_resolution":       run_resolution,
-            "_meta_run_insight_routing":  run_insight_routing,
+            "_meta_run_resolution":       (route == "resolution"),
+            "_meta_run_insight_routing":  (route == "insight"),
             "_meta_frontline_gap":        frontline_gap,
             "_meta_hitl_triggered":       requires_human,
-            "_meta_hitl_decision":        "auto_approved" if requires_human else "not_triggered",
+            "_meta_hitl_decision":        "auto_approved_demo" if requires_human else "not_triggered",
             "_meta_hitl_action":          action_taken,
             "_meta_ts_sd": ts_sd, "_meta_ts_res": ts_res,
             "_meta_ts_eea": ts_eea, "_meta_ts_ir": ts_ir, "_meta_ts_ln": ts_ln,
         }
-        # FIX 2 — append immediately so results grow as each signal completes
         st.session_state.demo_results = st.session_state.demo_results + [r]
-        slot_journey.markdown(case_journey_summary_html(signal, r), unsafe_allow_html=True)  # FIX 5
+        slot_journey.markdown(case_journey_summary_html(signal, r), unsafe_allow_html=True)
 
         if i < len(signals):
             st.markdown('<hr style="border:none;border-top:2px solid #EDE9FE;margin:1.25rem 0;">',
@@ -1080,13 +1186,12 @@ def render_live_demo_ui() -> None:
         f'<span style="background:{"#FEE2E2" if p=="high" else "#FEF3C7" if p=="medium" else "#DCFCE7"};'
         f'color:{"#DC2626" if p=="high" else "#D97706" if p=="medium" else "#059669"};'
         f'padding:2px 9px;border-radius:999px;font-size:.7rem;font-weight:600;">{p}</span>')
-    # Path column color coding per spec
+    # Route column color coding: Route 1 = green family, Route 2 = indigo
     _path_style = {
-        "Resolution only":         ("#059669", "#DCFCE7"),   # green
-        "Insight Routing only":    ("#4338CA", "#E0E7FF"),   # indigo
-        "Resolution + Insight":    ("#1D4ED8", "#DBEAFE"),   # blue
-        "Resolution + HITL":       ("#B45309", "#FEF3C7"),   # amber
-        "Resolution + EEA":        ("#0F766E", "#CCFBF1"),   # teal
+        "Route 1 — Resolution":          ("#059669", "#DCFCE7"),   # green
+        "Route 1 — Resolution + EEA":    ("#0F766E", "#CCFBF1"),   # teal
+        "Route 1 — Resolution + HITL":   ("#B45309", "#FEF3C7"),   # amber
+        "Route 2 — Insight only":        ("#4338CA", "#E0E7FF"),   # indigo
     }
     def path_cell(path):
         tc, bg = _path_style.get(path, ("#64748B", "#F1F5F9"))
@@ -1400,33 +1505,42 @@ def render_about_tab() -> None:
 
     st.markdown("""
 ---
-#### Routing Rules — 5 Paths (plain English)
+#### Routing Rules — 2 Mutually Exclusive Routes (plain English)
 ```
-PATH A — Resolution only         urgency ≥ 4  AND  pattern_risk = low
-           → Detection → Resolution → Learning
-           → isolated urgent case; no pattern escalation needed
+The Orchestrator chooses ONE route. These are the two diagram arrows:
+  ORC -->|Single urgent customer case| RES
+  ORC -->|Repeated pattern across customers| INS
 
-PATH B — Insight Routing only    urgency ≤ 3  AND  pattern_risk = high
-           → Detection → Insight Routing → Learning
-           → systemic business pattern; no individual resolution needed
+ROUTE 1 — Resolution    urgency ≥ 4
+           → Detection → Resolution Agent → Enterprise Systems → Learning
+           → Sub-routes (triggered by Resolution output):
+               HITL     : requires_human = true    → pause for Approve/Reject
+               EEA      : frontline_gap_detected = true → Employee Enablement
 
-PATH C — Resolution + Insight    urgency ≥ 4  AND  pattern_risk = medium or high
-           → Detection → Resolution + Insight Routing (parallel) → Learning
-           → urgent individual case AND widespread business pattern
+ROUTE 2 — Insight only  pattern_risk medium/high  AND  urgency ≤ 3
+           → Detection → Insight Routing Agent → T1–T5 Teams → Learning
+           → Resolution Agent: NOT called
+           → Employee Enablement: NOT called (requires Resolution first)
 
-PATH D — HITL governance         Resolution returns requires_human = true
-           → pipeline pauses for human Approve / Reject
-           → triggered by: legal threat, or refund value > $200 USD equivalent
-           → (Quick Generate and Manual modes; auto-approved in Live Demo)
-
-PATH E — Employee Enablement     Resolution returns frontline_gap_detected = true
-           → Resolution → Employee Enablement → Learning
-           → triggered by: contradictory staff info or employee knowledge gap
-
-         Learning & Insights     → always runs last on every path,
-                                   receives all previous outputs
+Default    urgency ≤ 3  AND  pattern_risk = low  → Route 1 (standard individual case)
 ```
 
+---
+#### Architecture Diagram
+""")
+
+    # DIAGRAM — About tab: Mermaid diagram with fallback code block
+    try:
+        from streamlit_mermaid import st_mermaid  # type: ignore
+        st_mermaid(MERMAID_DIAGRAM)
+    except ImportError:
+        st.code(MERMAID_DIAGRAM, language="text")
+        st.caption(
+            "Install streamlit-mermaid for interactive diagram rendering: "
+            "`pip install streamlit-mermaid`"
+        )
+
+    st.markdown("""
 ---
 #### Tech Stack
 | Component | Technology |
@@ -1633,7 +1747,8 @@ with col_main:
 
             # FIX 3 — Pipeline state machine with genuine HITL pause
             if run_clicked and st.session_state.signal:
-                for _k in ["_partial_detection","_partial_resolution","_partial_run_insight_routing",
+                for _k in ["_partial_detection","_partial_resolution","_partial_route",
+                           "_partial_routing_label","_partial_routing_reason",
                            "_partial_frontline_gap","_partial_action","_partial_customer_msg",
                            "_partial_urgency","_partial_pattern_risk","_partial_ts_sd","_partial_ts_res"]:
                     st.session_state.pop(_k, None)

@@ -1645,7 +1645,7 @@ def render_about_tab() -> None:
     st.markdown("""
     <div style="text-align:center; color:#94A3B8;
                 font-size:0.75rem; margin-top:1.5rem;">
-      Cosmic Mart Agentic AI Hackathon · Cohort 4 FY26 ·
+      Team Chicago · Cosmic Mart Agentic AI Hackathon · Cohort 4 FY26 ·
       Accenture AI Intensive
     </div>
     """, unsafe_allow_html=True)

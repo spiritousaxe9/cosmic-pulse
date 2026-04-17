@@ -129,26 +129,26 @@ DEMO_SIGNALS_META = [
 # ABOUT FIX — full detailed diagram with labels, subgraph legend, and rich node text
 COSMIC_PULSE_DIAGRAM = """flowchart TD
 
-  SIG[Experience Signals<br/>VoC + Ops Data<br/>- Support interactions<br/>- Social sentiment and topics<br/>- Reviews and feedback<br/>- Store feedback]:::ext
-  PII[PII Masking and Responsible AI<br/>Remove personal data<br/>Privacy controls across markets]:::ext
-  ENT[Enterprise Systems<br/>CRM - Contact Center - Commerce and Returns]:::ext
+  SIG["Experience Signals<br/>VoC + Ops Data<br/>Support - Social - Reviews - Store"]:::ext
+  PII["PII Masking and Responsible AI<br/>Remove personal data<br/>Privacy controls across markets"]:::ext
+  ENT["Enterprise Systems<br/>CRM - Contact Center - Commerce"]:::ext
 
-  DET["[Signal Detection Agent<br/>Detect friction and trends<br/>Tag topic: returns, support, price, store, product]"]:::agent
-  ORC["[Cosmic Pulse Orchestrator<br/>Choose workflow: Resolution or Insight Routing]"]:::agent
-  RES["[Resolution Agent<br/>Run Resolution Playbooks<br/>- Case routing and escalation<br/>- Returns and refunds where allowed]"]:::agent
-  EEA["[Employee Enablement Agent optional<br/>Just in time policy guidance<br/>Triggered by complexity or frontline strain]"]:::agent
-  INS["[Insight Routing Agent<br/>Run Insight Brief Templates<br/>Synthesize patterns and send briefs]"]:::agent
-  LRN["[Learning Agent<br/>Improve agent knowledge<br/>Update playbooks and brief templates]"]:::agent
+  DET["Signal Detection Agent<br/>Detect friction and trends<br/>Tag: returns, price, support, store"]:::agent
+  ORC["Cosmic Pulse Orchestrator<br/>Choose workflow: Resolution or Insight Routing"]:::agent
+  RES["Resolution Agent<br/>Run Resolution Playbooks<br/>Case routing, returns and refunds"]:::agent
+  EEA["Employee Enablement Agent<br/>Just-in-time policy guidance<br/>Triggered by frontline strain"]:::agent
+  INS["Insight Routing Agent<br/>Run Insight Brief Templates<br/>Synthesise patterns, send briefs"]:::agent
+  LRN["Learning Agent<br/>Improve agent knowledge<br/>Update playbooks and brief templates"]:::agent
 
-  GOV["[Human in the Loop Governance<br/>Approve high impact actions]"]:::gov
+  GOV["Human in the Loop Governance<br/>Approve high impact actions"]:::gov
 
-  T1(Pricing and Promotions):::stake
-  T2(Store Operations):::stake
-  T3(Merchandising and Assortment):::stake
-  T4(Returns and Policy Owners):::stake
-  T5(Support Leadership):::stake
-  OUT(Outcome Signals<br/>- Sentiment and topic shifts<br/>- Repeat complaint patterns<br/>- Team action taken):::stake
-  CXO(CXO Visibility<br/>Sentiment - Cost to serve - Demand trends):::stake
+  T1("Pricing and Promotions"):::stake
+  T2("Store Operations"):::stake
+  T3("Merchandising and Assortment"):::stake
+  T4("Returns and Policy Owners"):::stake
+  T5("Support Leadership"):::stake
+  OUT["Outcome Signals<br/>Sentiment shifts - Repeat patterns<br/>Team action taken"]:::stake
+  CXO["CXO Visibility<br/>Sentiment - Cost to serve - Demand"]:::stake
 
   SIG -->|Collect signals for analysis| PII
   PII -->|Anonymize for safe processing| DET
@@ -170,8 +170,8 @@ COSMIC_PULSE_DIAGRAM = """flowchart TD
   INS -->|Returns and policy friction| T4
   INS -->|Support responsiveness themes| T5
 
-  ENT -->|Service outcomes and repeat contact signals| OUT
-  INS -->|Insights sent and prioritization metadata| OUT
+  ENT -->|Service outcomes and repeat contact| OUT
+  INS -->|Insights sent and prioritization data| OUT
   T1 -.->|Team action status| OUT
   T2 -.->|Team action status| OUT
   T3 -.->|Team action status| OUT
@@ -187,14 +187,6 @@ COSMIC_PULSE_DIAGRAM = """flowchart TD
   classDef agent fill:#DBEAFE,stroke:#2563EB,color:#0F172A
   classDef stake fill:#DCFCE7,stroke:#16A34A,color:#052E16
   classDef gov fill:#FEF3C7,stroke:#D97706,color:#7C2D12
-
-  subgraph LEGEND["Legend"]
-    direction LR
-    LEXT[External Data / Systems]:::ext
-    LAGENT["[Agentic Component]"]:::agent
-    LSTAKE(Stakeholder / Outcome):::stake
-    LGOV["[Human Governance]"]:::gov
-  end
 """
 
 # ─────────────────────────────────────────────────────────────────────────────
